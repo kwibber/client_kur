@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/Kursovaya/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
