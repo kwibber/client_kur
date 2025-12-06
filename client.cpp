@@ -12,458 +12,582 @@
 #include <conio.h>
 #include <windows.h>
 
-std::atomic<bool> running(true);
+// Базовый класс для обработки сигналов
+class SignalHandler {
+private:
+    static std::atomic<bool> running;
 
-void signalHandler(int signal) {
-    running = false;
-}
+public:
+    static void initialize() {
+        std::signal(SIGINT, signalHandler);
+        std::signal(SIGTERM, signalHandler);
+    }
 
-// Функция для поиска узлов по BrowseName
-UA_NodeId findNodeByBrowseName(UA_Client *client, const char* browseName, UA_UInt16 namespaceIndex = 1) {
-    // Начнем с ObjectsFolder
-    UA_BrowseRequest bReq;
-    UA_BrowseRequest_init(&bReq);
-    
-    bReq.requestedMaxReferencesPerNode = 0;
-    bReq.nodesToBrowseSize = 1;
-    bReq.nodesToBrowse = (UA_BrowseDescription*)UA_Array_new(1, &UA_TYPES[UA_TYPES_BROWSEDESCRIPTION]);
-    
-    bReq.nodesToBrowse[0].nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
-    bReq.nodesToBrowse[0].resultMask = UA_BROWSERESULTMASK_ALL;
-    
-    UA_BrowseResponse bResp = UA_Client_Service_browse(client, bReq);
-    
-    UA_NodeId result = UA_NODEID_NULL;
-    
-    if (bResp.responseHeader.serviceResult == UA_STATUSCODE_GOOD) {
-        for (size_t i = 0; i < bResp.resultsSize; i++) {
-            UA_BrowseResult *res = &bResp.results[i];
-            if (res->statusCode == UA_STATUSCODE_GOOD) {
-                for (size_t j = 0; j < res->referencesSize; j++) {
-                    UA_ReferenceDescription *ref = &res->references[j];
-                    
-                    // Проверяем BrowseName
-                    if (ref->browseName.name.length > 0) {
-                        std::string name((char*)ref->browseName.name.data, ref->browseName.name.length);
-                        if (name == browseName) {
-                            result = ref->nodeId.nodeId;
-                            UA_BrowseRequest_clear(&bReq);
-                            UA_BrowseResponse_clear(&bResp);
-                            return result;
+    static bool isRunning() { return running; }
+    static void stop() { running = false; }
+
+private:
+    static void signalHandler(int signal) {
+        running = false;
+    }
+};
+
+std::atomic<bool> SignalHandler::running(true);
+
+// Класс для работы с кодировкой (только для Windows)
+class ConsoleEncoding {
+public:
+    static void setUTF8() {
+        SetConsoleOutputCP(CP_UTF8);
+        SetConsoleCP(CP_UTF8);
+    }
+};
+
+// Класс для представления узла OPC UA
+class OPCUANode {
+private:
+    UA_NodeId nodeId;
+    std::string browseName;
+    std::string displayName;
+
+public:
+    OPCUANode() : nodeId(UA_NODEID_NULL) {}
+
+    OPCUANode(const UA_NodeId& id, const std::string& bName = "", const std::string& dName = "") 
+        : browseName(bName), displayName(dName) {
+        UA_NodeId_copy(&id, &nodeId);
+    }
+
+    // Запрещаем копирование (правило пяти)
+    OPCUANode(const OPCUANode&) = delete;
+    OPCUANode& operator=(const OPCUANode&) = delete;
+
+    OPCUANode(OPCUANode&& other) noexcept : browseName(std::move(other.browseName)), 
+                                          displayName(std::move(other.displayName)) {
+        UA_NodeId_copy(&other.nodeId, &nodeId);
+        UA_NodeId_clear(&other.nodeId);
+    }
+
+    OPCUANode& operator=(OPCUANode&& other) noexcept {
+        if (this != &other) {
+            UA_NodeId_clear(&nodeId);
+            UA_NodeId_copy(&other.nodeId, &nodeId);
+            UA_NodeId_clear(&other.nodeId);
+            browseName = std::move(other.browseName);
+            displayName = std::move(other.displayName);
+        }
+        return *this;
+    }
+
+    ~OPCUANode() {
+        UA_NodeId_clear(&nodeId);
+    }
+
+    const UA_NodeId& getId() const { return nodeId; }
+    std::string getBrowseName() const { return browseName; }
+    std::string getDisplayName() const { return displayName; }
+
+    bool isValid() const { return !UA_NodeId_isNull(&nodeId); }
+
+    void printInfo() const {
+        if (isValid()) {
+            std::cout << browseName << " (ID: ns=" << nodeId.namespaceIndex 
+                      << "; i=" << nodeId.identifier.numeric << ")";
+        }
+    }
+};
+
+// Класс OPC UA клиента
+class OPCUAClient {
+private:
+    UA_Client* client;
+    std::string endpoint;
+
+    // Вспомогательная функция для освобождения ресурсов
+    void cleanup() {
+        if (client) {
+            UA_Client_delete(client);
+            client = nullptr;
+        }
+    }
+
+    // Вспомогательные функции для определения типа данных
+    template<typename T>
+    static const UA_DataType* getDataType();
+
+public:
+    OPCUAClient(const std::string& endpoint = "opc.tcp://127.0.0.1:4840") 
+        : client(nullptr), endpoint(endpoint) {}
+
+    // Запрещаем копирование
+    OPCUAClient(const OPCUAClient&) = delete;
+    OPCUAClient& operator=(const OPCUAClient&) = delete;
+
+    OPCUAClient(OPCUAClient&& other) noexcept : client(other.client), endpoint(std::move(other.endpoint)) {
+        other.client = nullptr;
+    }
+
+    OPCUAClient& operator=(OPCUAClient&& other) noexcept {
+        if (this != &other) {
+            cleanup();
+            client = other.client;
+            endpoint = std::move(other.endpoint);
+            other.client = nullptr;
+        }
+        return *this;
+    }
+
+    ~OPCUAClient() {
+        disconnect();
+        cleanup();
+    }
+
+    bool connect() {
+        if (client) return false;
+
+        client = UA_Client_new();
+        if (!client) return false;
+
+        UA_ClientConfig* config = UA_Client_getConfig(client);
+        UA_ClientConfig_setDefault(config);
+        config->timeout = 5000;
+
+        UA_StatusCode status = UA_Client_connect(client, endpoint.c_str());
+        if (status != UA_STATUSCODE_GOOD) {
+            std::cerr << "Failed to connect: " << UA_StatusCode_name(status) << std::endl;
+            cleanup();
+            return false;
+        }
+
+        return true;
+    }
+
+    void disconnect() {
+        if (client) {
+            UA_Client_disconnect(client);
+        }
+    }
+
+    bool isConnected() const {
+        if (!client) return false;
+        
+        // В новой версии open62541 UA_Client_getState имеет другую сигнатуру
+        // Проверяем состояние через альтернативный метод
+        UA_SecureChannelState channelState;
+        UA_SessionState sessionState;
+        UA_StatusCode connectStatus;
+        
+        UA_Client_getState(client, &channelState, &sessionState, &connectStatus);
+        
+        // Проверяем, что канал открыт и сессия активна
+        return (channelState == UA_SECURECHANNELSTATE_OPEN && 
+                sessionState == UA_SESSIONSTATE_ACTIVATED);
+    }
+
+    // Поиск узла по BrowseName в родительском узле
+    OPCUANode findNodeByBrowseName(const OPCUANode& parentNode, const std::string& browseName) const {
+        if (!client || !parentNode.isValid()) return OPCUANode();
+
+        UA_BrowseRequest bReq;
+        UA_BrowseRequest_init(&bReq);
+        
+        bReq.requestedMaxReferencesPerNode = 0;
+        bReq.nodesToBrowseSize = 1;
+        bReq.nodesToBrowse = (UA_BrowseDescription*)UA_Array_new(1, &UA_TYPES[UA_TYPES_BROWSEDESCRIPTION]);
+        
+        bReq.nodesToBrowse[0].nodeId = parentNode.getId();
+        bReq.nodesToBrowse[0].resultMask = UA_BROWSERESULTMASK_ALL;
+        bReq.nodesToBrowse[0].browseDirection = UA_BROWSEDIRECTION_FORWARD;
+        bReq.nodesToBrowse[0].referenceTypeId = UA_NODEID_NUMERIC(0, UA_NS0ID_HIERARCHICALREFERENCES);
+        bReq.nodesToBrowse[0].includeSubtypes = true;
+        bReq.nodesToBrowse[0].nodeClassMask = UA_NODECLASS_VARIABLE | UA_NODECLASS_OBJECT;
+        
+        UA_BrowseResponse bResp = UA_Client_Service_browse(client, bReq);
+        
+        OPCUANode result;
+        
+        if (bResp.responseHeader.serviceResult == UA_STATUSCODE_GOOD) {
+            for (size_t i = 0; i < bResp.resultsSize; i++) {
+                UA_BrowseResult* res = &bResp.results[i];
+                if (res->statusCode == UA_STATUSCODE_GOOD) {
+                    for (size_t j = 0; j < res->referencesSize; j++) {
+                        UA_ReferenceDescription* ref = &res->references[j];
+                        
+                        if (ref->browseName.name.length > 0) {
+                            std::string name((char*)ref->browseName.name.data, ref->browseName.name.length);
+                            if (name == browseName) {
+                                // Получаем DisplayName
+                                std::string displayName = "";
+                                if (ref->displayName.text.length > 0) {
+                                    displayName = std::string((char*)ref->displayName.text.data, 
+                                                             ref->displayName.text.length);
+                                }
+                                result = OPCUANode(ref->nodeId.nodeId, browseName, displayName);
+                                break;
+                            }
                         }
                     }
                 }
-            }
-        }
-    }
-    
-    UA_BrowseRequest_clear(&bReq);
-    UA_BrowseResponse_clear(&bResp);
-    return result;
-}
-
-int main() {
-    // Устанавливаем кодировку UTF-8 для Windows
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCP(CP_UTF8);
-
-    std::cout << "OPC UA Client starting..." << std::endl;
-    std::cout << "Controls:" << std::endl;
-    std::cout << "  - 'q' to quit" << std::endl;
-    std::cout << "  - 'r' to set new RPM value" << std::endl;
-    std::cout << std::endl;
-
-    std::signal(SIGINT, signalHandler);
-    std::signal(SIGTERM, signalHandler);
-
-    UA_Client *client = UA_Client_new();
-    UA_ClientConfig *config = UA_Client_getConfig(client);
-    UA_ClientConfig_setDefault(config);
-    config->timeout = 5000; // 5 секунд таймаут
-
-    // Подключаемся к серверу
-    UA_StatusCode status = UA_Client_connect(client, "opc.tcp://127.0.0.1:4840");
-    if (status != UA_STATUSCODE_GOOD) {
-        std::cerr << "Failed to connect: " << UA_StatusCode_name(status) << std::endl;
-        UA_Client_delete(client);
-        return 1;
-    }
-
-    std::cout << "Connected to server" << std::endl;
-    
-    // Поиск узлов по их именам
-    std::cout << "Looking for nodes..." << std::endl;
-    
-    UA_NodeId voltageId = findNodeByBrowseName(client, "Voltage");
-    UA_NodeId currentId = findNodeByBrowseName(client, "Current");
-    UA_NodeId rpmId = findNodeByBrowseName(client, "FlywheelRPM");
-    
-    if (UA_NodeId_isNull(&voltageId)) {
-        // Попробуем альтернативные варианты
-        std::cout << "Node 'Voltage' not found by BrowseName, trying direct NodeId..." << std::endl;
-        
-        // Попробуем разные возможные NodeId
-        std::vector<std::pair<int, int>> possibleIds = {
-            {1, 1}, {2, 1}, {3, 1}, {4, 1},
-            {1, 1000}, {1, 1001}, {1, 1002}
-        };
-        
-        for (auto& idPair : possibleIds) {
-            UA_NodeId testId = UA_NODEID_NUMERIC(idPair.first, idPair.second);
-            UA_ReadRequest rReq;
-            UA_ReadRequest_init(&rReq);
-            rReq.nodesToReadSize = 1;
-            rReq.nodesToRead = (UA_ReadValueId*)UA_Array_new(1, &UA_TYPES[UA_TYPES_READVALUEID]);
-            UA_ReadValueId_init(&rReq.nodesToRead[0]);
-            rReq.nodesToRead[0].nodeId = testId;
-            rReq.nodesToRead[0].attributeId = UA_ATTRIBUTEID_DISPLAYNAME;
-            
-            UA_ReadResponse rResp = UA_Client_Service_read(client, rReq);
-            
-            if (rResp.responseHeader.serviceResult == UA_STATUSCODE_GOOD &&
-                rResp.resultsSize > 0 &&
-                rResp.results[0].hasValue &&
-                UA_Variant_hasScalarType(&rResp.results[0].value, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT])) {
-                
-                UA_LocalizedText *lt = (UA_LocalizedText*)rResp.results[0].value.data;
-                std::string name((char*)lt->text.data, lt->text.length);
-                if (name.find("Voltage") != std::string::npos || 
-                    name.find("voltage") != std::string::npos ||
-                    name.find("VOLTAGE") != std::string::npos) {
-                    voltageId = testId;
-                    std::cout << "Found Voltage node: ns=" << idPair.first << ", i=" << idPair.second 
-                              << " (DisplayName: " << name << ")" << std::endl;
-                    break;
-                }
-            }
-            
-            UA_ReadRequest_clear(&rReq);
-            UA_ReadResponse_clear(&rResp);
-        }
-    } else {
-        std::cout << "Found Voltage node" << std::endl;
-    }
-    
-    if (UA_NodeId_isNull(&currentId)) {
-        std::cout << "Node 'Current' not found by BrowseName, trying direct NodeId..." << std::endl;
-        
-        std::vector<std::pair<int, int>> possibleIds = {
-            {1, 2}, {2, 2}, {3, 2}, {4, 2},
-            {1, 1003}, {1, 1004}, {1, 1005}
-        };
-        
-        for (auto& idPair : possibleIds) {
-            UA_NodeId testId = UA_NODEID_NUMERIC(idPair.first, idPair.second);
-            UA_ReadRequest rReq;
-            UA_ReadRequest_init(&rReq);
-            rReq.nodesToReadSize = 1;
-            rReq.nodesToRead = (UA_ReadValueId*)UA_Array_new(1, &UA_TYPES[UA_TYPES_READVALUEID]);
-            UA_ReadValueId_init(&rReq.nodesToRead[0]);
-            rReq.nodesToRead[0].nodeId = testId;
-            rReq.nodesToRead[0].attributeId = UA_ATTRIBUTEID_DISPLAYNAME;
-            
-            UA_ReadResponse rResp = UA_Client_Service_read(client, rReq);
-            
-            if (rResp.responseHeader.serviceResult == UA_STATUSCODE_GOOD &&
-                rResp.resultsSize > 0 &&
-                rResp.results[0].hasValue &&
-                UA_Variant_hasScalarType(&rResp.results[0].value, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT])) {
-                
-                UA_LocalizedText *lt = (UA_LocalizedText*)rResp.results[0].value.data;
-                std::string name((char*)lt->text.data, lt->text.length);
-                if (name.find("Current") != std::string::npos || 
-                    name.find("current") != std::string::npos ||
-                    name.find("CURRENT") != std::string::npos) {
-                    currentId = testId;
-                    std::cout << "Found Current node: ns=" << idPair.first << ", i=" << idPair.second 
-                              << " (DisplayName: " << name << ")" << std::endl;
-                    break;
-                }
-            }
-            
-            UA_ReadRequest_clear(&rReq);
-            UA_ReadResponse_clear(&rResp);
-        }
-    } else {
-        std::cout << "Found Current node" << std::endl;
-    }
-    
-    if (UA_NodeId_isNull(&rpmId)) {
-        std::cout << "Node 'FlywheelRPM' not found by BrowseName, trying direct NodeId..." << std::endl;
-        
-        std::vector<std::pair<int, int>> possibleIds = {
-            {1, 3}, {2, 3}, {3, 3}, {4, 3},
-            {1, 1006}, {1, 1007}, {1, 1008}
-        };
-        
-        for (auto& idPair : possibleIds) {
-            UA_NodeId testId = UA_NODEID_NUMERIC(idPair.first, idPair.second);
-            UA_ReadRequest rReq;
-            UA_ReadRequest_init(&rReq);
-            rReq.nodesToReadSize = 1;
-            rReq.nodesToRead = (UA_ReadValueId*)UA_Array_new(1, &UA_TYPES[UA_TYPES_READVALUEID]);
-            UA_ReadValueId_init(&rReq.nodesToRead[0]);
-            rReq.nodesToRead[0].nodeId = testId;
-            rReq.nodesToRead[0].attributeId = UA_ATTRIBUTEID_DISPLAYNAME;
-            
-            UA_ReadResponse rResp = UA_Client_Service_read(client, rReq);
-            
-            if (rResp.responseHeader.serviceResult == UA_STATUSCODE_GOOD &&
-                rResp.resultsSize > 0 &&
-                rResp.results[0].hasValue &&
-                UA_Variant_hasScalarType(&rResp.results[0].value, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT])) {
-                
-                UA_LocalizedText *lt = (UA_LocalizedText*)rResp.results[0].value.data;
-                std::string name((char*)lt->text.data, lt->text.length);
-                if (name.find("Flywheel") != std::string::npos || 
-                    name.find("flywheel") != std::string::npos ||
-                    name.find("RPM") != std::string::npos ||
-                    name.find("rpm") != std::string::npos) {
-                    rpmId = testId;
-                    std::cout << "Found Flywheel RPM node: ns=" << idPair.first << ", i=" << idPair.second 
-                              << " (DisplayName: " << name << ")" << std::endl;
-                    break;
-                }
-            }
-            
-            UA_ReadRequest_clear(&rReq);
-            UA_ReadResponse_clear(&rResp);
-        }
-    } else {
-        std::cout << "Found Flywheel RPM node" << std::endl;
-    }
-    
-    // Проверим, что нашли хотя бы один узел
-    if (UA_NodeId_isNull(&voltageId) && UA_NodeId_isNull(&currentId) && UA_NodeId_isNull(&rpmId)) {
-        std::cerr << "Could not find any nodes. Make sure server is running and has created the variables." << std::endl;
-        std::cerr << "Trying brute force search..." << std::endl;
-        
-        // Полный перебор по ограниченному диапазону
-        for (int ns = 0; ns < 5; ns++) {
-            for (int id = 1; id < 50; id++) {
-                UA_NodeId testId = UA_NODEID_NUMERIC(ns, id);
-                UA_ReadRequest rReq;
-                UA_ReadRequest_init(&rReq);
-                rReq.nodesToReadSize = 1;
-                rReq.nodesToRead = (UA_ReadValueId*)UA_Array_new(1, &UA_TYPES[UA_TYPES_READVALUEID]);
-                UA_ReadValueId_init(&rReq.nodesToRead[0]);
-                rReq.nodesToRead[0].nodeId = testId;
-                rReq.nodesToRead[0].attributeId = UA_ATTRIBUTEID_VALUE;
-                
-                UA_ReadResponse rResp = UA_Client_Service_read(client, rReq);
-                
-                if (rResp.responseHeader.serviceResult == UA_STATUSCODE_GOOD &&
-                    rResp.resultsSize > 0 &&
-                    rResp.results[0].hasValue) {
-                    
-                    // Просто выведем, что нашли
-                    std::cout << "Found node at ns=" << ns << ", i=" << id 
-                              << " with some value" << std::endl;
-                    
-                    // Если это double, то возможно это наша переменная
-                    if (UA_Variant_hasScalarType(&rResp.results[0].value, &UA_TYPES[UA_TYPES_DOUBLE])) {
-                        double value = *(double*)rResp.results[0].value.data;
-                        std::cout << "  Value: " << value << std::endl;
-                        
-                        // Проверим DisplayName для идентификации
-                        UA_ReadRequest dnReq;
-                        UA_ReadRequest_init(&dnReq);
-                        dnReq.nodesToReadSize = 1;
-                        dnReq.nodesToRead = (UA_ReadValueId*)UA_Array_new(1, &UA_TYPES[UA_TYPES_READVALUEID]);
-                        UA_ReadValueId_init(&dnReq.nodesToRead[0]);
-                        dnReq.nodesToRead[0].nodeId = testId;
-                        dnReq.nodesToRead[0].attributeId = UA_ATTRIBUTEID_DISPLAYNAME;
-                        
-                        UA_ReadResponse dnResp = UA_Client_Service_read(client, dnReq);
-                        
-                        if (dnResp.responseHeader.serviceResult == UA_STATUSCODE_GOOD &&
-                            dnResp.resultsSize > 0 &&
-                            dnResp.results[0].hasValue &&
-                            UA_Variant_hasScalarType(&dnResp.results[0].value, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT])) {
-                            
-                            UA_LocalizedText *lt = (UA_LocalizedText*)dnResp.results[0].value.data;
-                            std::string name((char*)lt->text.data, lt->text.length);
-                            std::cout << "  DisplayName: " << name << std::endl;
-                        }
-                        
-                        UA_ReadRequest_clear(&dnReq);
-                        UA_ReadResponse_clear(&dnResp);
-                    }
-                }
-                
-                UA_ReadRequest_clear(&rReq);
-                UA_ReadResponse_clear(&rResp);
+                if (result.isValid()) break;
             }
         }
         
-        std::cerr << "Exiting..." << std::endl;
-        UA_Client_disconnect(client);
-        UA_Client_delete(client);
-        return 1;
+        UA_BrowseRequest_clear(&bReq);
+        UA_BrowseResponse_clear(&bResp);
+        
+        return result;
     }
 
-    // Основной цикл
-    std::cout << "\nStarting to read values... Press 'r' to set new RPM value, 'q' to quit\n" << std::endl;
+    // Чтение значения узла
+    template<typename T>
+    bool readValue(const OPCUANode& node, T& value) const {
+        if (!client || !node.isValid()) return false;
+
+        UA_ReadRequest rReq;
+        UA_ReadRequest_init(&rReq);
+        rReq.nodesToReadSize = 1;
+        rReq.nodesToRead = (UA_ReadValueId*)UA_Array_new(1, &UA_TYPES[UA_TYPES_READVALUEID]);
+        UA_ReadValueId_init(&rReq.nodesToRead[0]);
+        rReq.nodesToRead[0].nodeId = node.getId();
+        rReq.nodesToRead[0].attributeId = UA_ATTRIBUTEID_VALUE;
+        
+        UA_ReadResponse rResp = UA_Client_Service_read(client, rReq);
+        
+        bool success = false;
+        
+        const UA_DataType* dataType = getDataType<T>();
+        if (dataType && 
+            rResp.responseHeader.serviceResult == UA_STATUSCODE_GOOD &&
+            rResp.resultsSize > 0 &&
+            rResp.results[0].hasValue &&
+            UA_Variant_hasScalarType(&rResp.results[0].value, dataType)) {
+            
+            value = *(T*)rResp.results[0].value.data;
+            success = true;
+        }
+        
+        UA_ReadRequest_clear(&rReq);
+        UA_ReadResponse_clear(&rResp);
+        
+        return success;
+    }
+
+    // Чтение строкового значения (DisplayName)
+    bool readDisplayName(const OPCUANode& node, std::string& displayName) const {
+        if (!client || !node.isValid()) return false;
+
+        UA_ReadRequest rReq;
+        UA_ReadRequest_init(&rReq);
+        rReq.nodesToReadSize = 1;
+        rReq.nodesToRead = (UA_ReadValueId*)UA_Array_new(1, &UA_TYPES[UA_TYPES_READVALUEID]);
+        UA_ReadValueId_init(&rReq.nodesToRead[0]);
+        rReq.nodesToRead[0].nodeId = node.getId();
+        rReq.nodesToRead[0].attributeId = UA_ATTRIBUTEID_DISPLAYNAME;
+        
+        UA_ReadResponse rResp = UA_Client_Service_read(client, rReq);
+        
+        bool success = false;
+        
+        if (rResp.responseHeader.serviceResult == UA_STATUSCODE_GOOD &&
+            rResp.resultsSize > 0 &&
+            rResp.results[0].hasValue &&
+            UA_Variant_hasScalarType(&rResp.results[0].value, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT])) {
+            
+            UA_LocalizedText* lt = (UA_LocalizedText*)rResp.results[0].value.data;
+            displayName = std::string((char*)lt->text.data, lt->text.length);
+            success = true;
+        }
+        
+        UA_ReadRequest_clear(&rReq);
+        UA_ReadResponse_clear(&rResp);
+        
+        return success;
+    }
+
+    // Запись значения
+    template<typename T>
+    bool writeValue(const OPCUANode& node, const T& value) {
+        if (!client || !node.isValid()) return false;
+
+        UA_WriteRequest wReq;
+        UA_WriteRequest_init(&wReq);
+        
+        wReq.nodesToWriteSize = 1;
+        wReq.nodesToWrite = (UA_WriteValue*)UA_Array_new(1, &UA_TYPES[UA_TYPES_WRITEVALUE]);
+        UA_WriteValue_init(&wReq.nodesToWrite[0]);
+        
+        wReq.nodesToWrite[0].nodeId = node.getId();
+        wReq.nodesToWrite[0].attributeId = UA_ATTRIBUTEID_VALUE;
+        wReq.nodesToWrite[0].value.hasValue = true;
+        
+        const UA_DataType* dataType = getDataType<T>();
+        if (!dataType) return false;
+        
+        UA_Variant_setScalarCopy(&wReq.nodesToWrite[0].value.value, &value, dataType);
+        
+        UA_WriteResponse wResp = UA_Client_Service_write(client, wReq);
+        
+        bool success = (wResp.responseHeader.serviceResult == UA_STATUSCODE_GOOD &&
+                       wResp.resultsSize > 0 &&
+                       wResp.results[0] == UA_STATUSCODE_GOOD);
+        
+        UA_WriteRequest_clear(&wReq);
+        UA_WriteResponse_clear(&wResp);
+        
+        return success;
+    }
+};
+
+// Специализации для getDataType (выносим из класса)
+template<>
+const UA_DataType* OPCUAClient::getDataType<double>() { return &UA_TYPES[UA_TYPES_DOUBLE]; }
+
+template<>
+const UA_DataType* OPCUAClient::getDataType<int>() { return &UA_TYPES[UA_TYPES_INT32]; }
+
+template<>
+const UA_DataType* OPCUAClient::getDataType<float>() { return &UA_TYPES[UA_TYPES_FLOAT]; }
+
+// Класс для управления устройством "Мультиметр"
+class MultimeterDevice {
+private:
+    OPCUANode deviceNode;
+    OPCUANode voltageNode;
+    OPCUANode currentNode;
+
+public:
+    MultimeterDevice() {}
+
+    bool initialize(OPCUAClient& client, const OPCUANode& parentNode) {
+        // Ищем устройство
+        deviceNode = client.findNodeByBrowseName(parentNode, "Multimeter");
+        if (!deviceNode.isValid()) {
+            return false;
+        }
+
+        // Ищем переменные внутри устройства
+        voltageNode = client.findNodeByBrowseName(deviceNode, "Voltage");
+        currentNode = client.findNodeByBrowseName(deviceNode, "Current");
+
+        return true;
+    }
+
+    bool readValues(OPCUAClient& client, double& voltage, double& current) const {
+        bool voltageOk = client.readValue(voltageNode, voltage);
+        bool currentOk = client.readValue(currentNode, current);
+        
+        return voltageOk || currentOk; // Возвращаем true, если хотя бы одно значение прочитано
+    }
+
+    void printStatus() const {
+        std::cout << "Мультиметр: ";
+        if (voltageNode.isValid()) std::cout << "Напряжение доступно, ";
+        if (currentNode.isValid()) std::cout << "Ток доступен";
+        std::cout << std::endl;
+    }
+
+    const OPCUANode& getVoltageNode() const { return voltageNode; }
+    const OPCUANode& getCurrentNode() const { return currentNode; }
+    const OPCUANode& getDeviceNode() const { return deviceNode; }
+};
+
+// Класс для управления RPM (обороты маховика)
+class FlywheelRPM {
+private:
+    OPCUANode rpmNode;
+
+public:
+    bool initialize(OPCUAClient& client, const OPCUANode& parentNode) {
+        rpmNode = client.findNodeByBrowseName(parentNode, "FlywheelRPM");
+        return rpmNode.isValid();
+    }
+
+    bool readValue(OPCUAClient& client, double& rpm) const {
+        return client.readValue(rpmNode, rpm);
+    }
+
+    bool setValue(OPCUAClient& client, double rpm) {
+        return client.writeValue(rpmNode, rpm);
+    }
+
+    const OPCUANode& getNode() const { return rpmNode; }
+};
+
+// Основной класс приложения
+class OPCUAApplication {
+private:
+    OPCUAClient client;
+    MultimeterDevice multimeter;
+    FlywheelRPM flywheelRPM;
     
-    while (running) {
-        // Проверяем нажатие клавиш
+    OPCUANode objectsFolder;
+    
+    bool nodesFound;
+
+public:
+    OPCUAApplication(const std::string& endpoint = "opc.tcp://127.0.0.1:4840")
+        : client(endpoint), nodesFound(false) {
+        
+        objectsFolder = OPCUANode(UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER), "Objects", "Objects Folder");
+    }
+
+    bool initialize() {
+        ConsoleEncoding::setUTF8();
+        SignalHandler::initialize();
+
+        printWelcome();
+
+        if (!client.connect()) {
+            return false;
+        }
+
+        std::cout << "Connected to server" << std::endl;
+        std::cout << "Looking for nodes..." << std::endl;
+
+        // Инициализация устройств
+        bool multimeterFound = multimeter.initialize(client, objectsFolder);
+        bool rpmFound = flywheelRPM.initialize(client, objectsFolder);
+
+        if (multimeterFound) {
+            multimeter.printStatus();
+        }
+
+        if (rpmFound) {
+            std::cout << "Flywheel RPM found" << std::endl;
+        }
+
+        nodesFound = multimeterFound || rpmFound;
+
+        if (!nodesFound) {
+            std::cerr << "\nERROR: Could not find any nodes." << std::endl;
+            return false;
+        }
+
+        return true;
+    }
+
+    void run() {
+        std::cout << "\n\nStarting to read values..." << std::endl;
+        std::cout << "Controls: Press 'r' to set new RPM value, 'q' to quit\n" << std::endl;
+
+        while (SignalHandler::isRunning()) {
+            handleInput();
+            readAndDisplayValues();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        }
+
+        shutdown();
+    }
+
+private:
+    void printWelcome() const {
+        std::cout << "OPC UA Client starting..." << std::endl;
+        std::cout << "Controls:" << std::endl;
+        std::cout << "  - 'q' to quit" << std::endl;
+        std::cout << "  - 'r' to set new RPM value" << std::endl;
+        std::cout << std::endl;
+    }
+
+    void handleInput() {
         if (_kbhit()) {
             char c = _getch();
             
-            if (c == 'q' || c == 'Q') {
-                std::cout << "\nQuitting..." << std::endl;
-                running = false;
-                break;
-            }
-            else if (c == 'r' || c == 'R') {
-                if (!UA_NodeId_isNull(&rpmId)) {
-                    // Запрос нового значения RPM
-                    std::cout << "\nEnter new RPM value: ";
+            switch (c) {
+                case 'q':
+                case 'Q':
+                    std::cout << "\nQuitting..." << std::endl;
+                    SignalHandler::stop();
+                    break;
                     
-                    std::string input;
-                    std::getline(std::cin, input);
-                    
-                    try {
-                        double newRpm = std::stod(input);
-                        
-                        // Записываем новое значение через UA_Client_Service_write
-                        UA_WriteRequest wReq;
-                        UA_WriteRequest_init(&wReq);
-                        
-                        wReq.nodesToWriteSize = 1;
-                        wReq.nodesToWrite = (UA_WriteValue*)UA_Array_new(1, &UA_TYPES[UA_TYPES_WRITEVALUE]);
-                        
-                        // Инициализируем WriteValue
-                        UA_WriteValue_init(&wReq.nodesToWrite[0]);
-                        wReq.nodesToWrite[0].nodeId = rpmId;
-                        wReq.nodesToWrite[0].attributeId = UA_ATTRIBUTEID_VALUE;
-                        
-                        // Устанавливаем значение
-                        wReq.nodesToWrite[0].value.hasValue = true;
-                        UA_Variant_setScalarCopy(&wReq.nodesToWrite[0].value.value, &newRpm, &UA_TYPES[UA_TYPES_DOUBLE]);
-                        
-                        UA_WriteResponse wResp = UA_Client_Service_write(client, wReq);
-                        
-                        if (wResp.responseHeader.serviceResult == UA_STATUSCODE_GOOD &&
-                            wResp.resultsSize > 0 &&
-                            wResp.results[0] == UA_STATUSCODE_GOOD) {
-                            std::cout << "Successfully set RPM to: " << newRpm << std::endl;
-                        } else {
-                            std::cerr << "Failed to write RPM value" << std::endl;
-                            if (wResp.resultsSize > 0) {
-                                std::cerr << "Error: " << UA_StatusCode_name(wResp.results[0]) << std::endl;
-                            }
-                        }
-                        
-                        UA_WriteRequest_clear(&wReq);
-                        UA_WriteResponse_clear(&wResp);
-                    }
-                    catch (const std::exception& e) {
-                        std::cerr << "Invalid input: " << e.what() << std::endl;
-                    }
-                } else {
-                    std::cerr << "\nRPM node not found, cannot set value." << std::endl;
-                }
+                case 'r':
+                case 'R':
+                    handleRPMInput();
+                    break;
             }
         }
-
-        // Читаем значения всех доступных переменных
-        std::cout << "\r";
-        
-        // Считаем, сколько узлов найдено
-        int foundNodes = 0;
-        if (!UA_NodeId_isNull(&voltageId)) foundNodes++;
-        if (!UA_NodeId_isNull(&currentId)) foundNodes++;
-        if (!UA_NodeId_isNull(&rpmId)) foundNodes++;
-        
-        if (foundNodes == 0) {
-            std::cout << "No nodes found to read. Waiting..." << std::flush;
-        } else {
-            // Создаем запрос на чтение для всех найденных переменных
-            UA_ReadRequest rReq;
-            UA_ReadRequest_init(&rReq);
-            
-            rReq.nodesToReadSize = foundNodes;
-            rReq.nodesToRead = (UA_ReadValueId*)UA_Array_new(foundNodes, &UA_TYPES[UA_TYPES_READVALUEID]);
-            
-            int idx = 0;
-            
-            if (!UA_NodeId_isNull(&voltageId)) {
-                UA_ReadValueId_init(&rReq.nodesToRead[idx]);
-                rReq.nodesToRead[idx].nodeId = voltageId;
-                rReq.nodesToRead[idx].attributeId = UA_ATTRIBUTEID_VALUE;
-                idx++;
-            }
-            
-            if (!UA_NodeId_isNull(&currentId)) {
-                UA_ReadValueId_init(&rReq.nodesToRead[idx]);
-                rReq.nodesToRead[idx].nodeId = currentId;
-                rReq.nodesToRead[idx].attributeId = UA_ATTRIBUTEID_VALUE;
-                idx++;
-            }
-            
-            if (!UA_NodeId_isNull(&rpmId)) {
-                UA_ReadValueId_init(&rReq.nodesToRead[idx]);
-                rReq.nodesToRead[idx].nodeId = rpmId;
-                rReq.nodesToRead[idx].attributeId = UA_ATTRIBUTEID_VALUE;
-                idx++;
-            }
-            
-            UA_ReadResponse rResp = UA_Client_Service_read(client, rReq);
-            
-            if (rResp.responseHeader.serviceResult == UA_STATUSCODE_GOOD) {
-                idx = 0;
-                
-                if (!UA_NodeId_isNull(&voltageId)) {
-                    if (rResp.resultsSize > idx && rResp.results[idx].hasValue && 
-                        UA_Variant_hasScalarType(&rResp.results[idx].value, &UA_TYPES[UA_TYPES_DOUBLE])) {
-                        double voltage = *(double*)rResp.results[idx].value.data;
-                        std::cout << "Voltage: " << std::fixed << std::setprecision(2) << voltage << " V, ";
-                    } else {
-                        std::cout << "Voltage: N/A, ";
-                    }
-                    idx++;
-                }
-                
-                if (!UA_NodeId_isNull(&currentId)) {
-                    if (rResp.resultsSize > idx && rResp.results[idx].hasValue && 
-                        UA_Variant_hasScalarType(&rResp.results[idx].value, &UA_TYPES[UA_TYPES_DOUBLE])) {
-                        double current = *(double*)rResp.results[idx].value.data;
-                        std::cout << "Current: " << std::fixed << std::setprecision(2) << current << " A, ";
-                    } else {
-                        std::cout << "Current: N/A, ";
-                    }
-                    idx++;
-                }
-                
-                if (!UA_NodeId_isNull(&rpmId)) {
-                    if (rResp.resultsSize > idx && rResp.results[idx].hasValue && 
-                        UA_Variant_hasScalarType(&rResp.results[idx].value, &UA_TYPES[UA_TYPES_DOUBLE])) {
-                        double rpm = *(double*)rResp.results[idx].value.data;
-                        std::cout << "Flywheel RPM: " << std::fixed << std::setprecision(2) << rpm << " RPM      ";
-                    } else {
-                        std::cout << "Flywheel RPM: N/A      ";
-                    }
-                    idx++;
-                }
-            } else {
-                std::cout << "Read failed: " << UA_StatusCode_name(rResp.responseHeader.serviceResult) << "      ";
-            }
-            
-            UA_ReadRequest_clear(&rReq);
-            UA_ReadResponse_clear(&rResp);
-        }
-        
-        std::cout << std::flush;
-        
-        // Небольшая задержка
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
 
-    std::cout << "\nDisconnecting..." << std::endl;
-    UA_Client_disconnect(client);
-    UA_Client_delete(client);
+    void handleRPMInput() {
+        if (!flywheelRPM.getNode().isValid()) {
+            std::cerr << "\nRPM node not found, cannot set value." << std::endl;
+            return;
+        }
 
-    std::cout << "Client stopped." << std::endl;
+        std::cout << "\nEnter new RPM value: ";
+        std::string input;
+        std::getline(std::cin, input);
+
+        try {
+            double newRpm = std::stod(input);
+            
+            if (flywheelRPM.setValue(client, newRpm)) {
+                std::cout << "Successfully set RPM to: " << newRpm << std::endl;
+            } else {
+                std::cerr << "Failed to write RPM value" << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Invalid input: " << e.what() << std::endl;
+        }
+    }
+
+    void readAndDisplayValues() {
+        std::cout << "\r";
+
+        double voltage = 0.0, current = 0.0, rpm = 0.0;
+        bool hasVoltage = false, hasCurrent = false, hasRPM = false;
+
+        // Чтение значений мультиметра
+        if (multimeter.getDeviceNode().isValid()) {
+            hasVoltage = client.readValue(multimeter.getVoltageNode(), voltage);
+            hasCurrent = client.readValue(multimeter.getCurrentNode(), current);
+        }
+
+        // Чтение RPM
+        if (flywheelRPM.getNode().isValid()) {
+            hasRPM = flywheelRPM.readValue(client, rpm);
+        }
+
+        // Вывод значений
+        if (multimeter.getDeviceNode().isValid()) {
+            std::cout << "Мультиметр: ";
+        }
+
+        if (hasVoltage) {
+            std::cout << "Напряжение: " << std::fixed << std::setprecision(2) << voltage << " V, ";
+        }
+
+        if (hasCurrent) {
+            std::cout << "Ток: " << std::fixed << std::setprecision(2) << current << " A, ";
+        }
+
+        if (hasRPM) {
+            std::cout << "Обороты маховика: " << std::fixed << std::setprecision(2) << rpm << " RPM      ";
+        } else if (flywheelRPM.getNode().isValid()) {
+            std::cout << "Обороты маховика: N/A      ";
+        }
+
+        if (!hasVoltage && !hasCurrent && !hasRPM) {
+            std::cout << "Waiting for data...      ";
+        }
+
+        std::cout << std::flush;
+    }
+
+    void shutdown() {
+        std::cout << "\nDisconnecting..." << std::endl;
+        client.disconnect();
+        std::cout << "Client stopped." << std::endl;
+    }
+};
+
+int main() {
+    OPCUAApplication app;
+    
+    if (!app.initialize()) {
+        return 1;
+    }
+    
+    app.run();
+    
     return 0;
 }
