@@ -44,8 +44,37 @@ cmake_ninja_workdir = C$:/Kursovaya/build/
 
 build cmake_object_order_depends_target_Kursovaya: phony || .
 
-build CMakeFiles/Kursovaya.dir/client.cpp.obj: CXX_COMPILER__Kursovaya_unscanned_ C$:/Kursovaya/client.cpp || cmake_object_order_depends_target_Kursovaya
-  DEP_FILE = CMakeFiles\Kursovaya.dir\client.cpp.obj.d
+build CMakeFiles/Kursovaya.dir/main.cpp.obj: CXX_COMPILER__Kursovaya_unscanned_ C$:/Kursovaya/main.cpp || cmake_object_order_depends_target_Kursovaya
+  DEFINES = -DWIN32_LEAN_AND_MEAN -D_CRT_SECURE_NO_WARNINGS
+  DEP_FILE = CMakeFiles\Kursovaya.dir\main.cpp.obj.d
+  FLAGS = -std=gnu++17
+  INCLUDES = -isystem C:/Kursovaya/build/vcpkg_installed/x64-windows/include
+  OBJECT_DIR = CMakeFiles\Kursovaya.dir
+  OBJECT_FILE_DIR = CMakeFiles\Kursovaya.dir
+  TARGET_SUPPORT_DIR = CMakeFiles\Kursovaya.dir
+
+build CMakeFiles/Kursovaya.dir/opcua_client.cpp.obj: CXX_COMPILER__Kursovaya_unscanned_ C$:/Kursovaya/opcua_client.cpp || cmake_object_order_depends_target_Kursovaya
+  DEFINES = -DWIN32_LEAN_AND_MEAN -D_CRT_SECURE_NO_WARNINGS
+  DEP_FILE = CMakeFiles\Kursovaya.dir\opcua_client.cpp.obj.d
+  FLAGS = -std=gnu++17
+  INCLUDES = -isystem C:/Kursovaya/build/vcpkg_installed/x64-windows/include
+  OBJECT_DIR = CMakeFiles\Kursovaya.dir
+  OBJECT_FILE_DIR = CMakeFiles\Kursovaya.dir
+  TARGET_SUPPORT_DIR = CMakeFiles\Kursovaya.dir
+
+build CMakeFiles/Kursovaya.dir/device_managers.cpp.obj: CXX_COMPILER__Kursovaya_unscanned_ C$:/Kursovaya/device_managers.cpp || cmake_object_order_depends_target_Kursovaya
+  DEFINES = -DWIN32_LEAN_AND_MEAN -D_CRT_SECURE_NO_WARNINGS
+  DEP_FILE = CMakeFiles\Kursovaya.dir\device_managers.cpp.obj.d
+  FLAGS = -std=gnu++17
+  INCLUDES = -isystem C:/Kursovaya/build/vcpkg_installed/x64-windows/include
+  OBJECT_DIR = CMakeFiles\Kursovaya.dir
+  OBJECT_FILE_DIR = CMakeFiles\Kursovaya.dir
+  TARGET_SUPPORT_DIR = CMakeFiles\Kursovaya.dir
+
+build CMakeFiles/Kursovaya.dir/console_manager.cpp.obj: CXX_COMPILER__Kursovaya_unscanned_ C$:/Kursovaya/console_manager.cpp || cmake_object_order_depends_target_Kursovaya
+  DEFINES = -DWIN32_LEAN_AND_MEAN -D_CRT_SECURE_NO_WARNINGS
+  DEP_FILE = CMakeFiles\Kursovaya.dir\console_manager.cpp.obj.d
+  FLAGS = -std=gnu++17
   INCLUDES = -isystem C:/Kursovaya/build/vcpkg_installed/x64-windows/include
   OBJECT_DIR = CMakeFiles\Kursovaya.dir
   OBJECT_FILE_DIR = CMakeFiles\Kursovaya.dir
@@ -59,8 +88,8 @@ build CMakeFiles/Kursovaya.dir/client.cpp.obj: CXX_COMPILER__Kursovaya_unscanned
 #############################################
 # Link the executable Kursovaya.exe
 
-build Kursovaya.exe: CXX_EXECUTABLE_LINKER__Kursovaya_ CMakeFiles/Kursovaya.dir/client.cpp.obj | vcpkg_installed/x64-windows/debug/lib/open62541.lib
-  LINK_LIBRARIES = vcpkg_installed/x64-windows/debug/lib/open62541.lib  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
+build Kursovaya.exe: CXX_EXECUTABLE_LINKER__Kursovaya_ CMakeFiles/Kursovaya.dir/main.cpp.obj CMakeFiles/Kursovaya.dir/opcua_client.cpp.obj CMakeFiles/Kursovaya.dir/device_managers.cpp.obj CMakeFiles/Kursovaya.dir/console_manager.cpp.obj | vcpkg_installed/x64-windows/debug/lib/open62541.lib
+  LINK_LIBRARIES = vcpkg_installed/x64-windows/debug/lib/open62541.lib  -lws2_32  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
   OBJECT_DIR = CMakeFiles\Kursovaya.dir
   POST_BUILD = C:\WINDOWS\system32\cmd.exe /C "cd /D C:\Kursovaya\build && "C:\Program Files\WindowsApps\Microsoft.PowerShell_7.5.4.0_x64__8wekyb3d8bbwe\pwsh.exe" -noprofile -executionpolicy Bypass -file C:/Users/vadim/Documents/code/vcpkg/scripts/buildsystems/msbuild/applocal.ps1 -targetBinary C:/Kursovaya/build/Kursovaya.exe -installedDir C:/Kursovaya/build/vcpkg_installed/x64-windows/bin -OutVariable out"
   PRE_LINK = cd .
@@ -68,6 +97,30 @@ build Kursovaya.exe: CXX_EXECUTABLE_LINKER__Kursovaya_ CMakeFiles/Kursovaya.dir/
   TARGET_IMPLIB = libKursovaya.dll.a
   TARGET_PDB = Kursovaya.exe.dbg
   TARGET_SUPPORT_DIR = CMakeFiles\Kursovaya.dir
+
+
+#############################################
+# Utility command for package
+
+build CMakeFiles/package.util: CUSTOM_COMMAND all
+  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D C:\Kursovaya\build && "C:\Program Files\CMake\bin\cpack.exe" --config ./CPackConfig.cmake"
+  DESC = Run CPack packaging tool...
+  pool = console
+  restat = 1
+
+build package: phony CMakeFiles/package.util
+
+
+#############################################
+# Utility command for package_source
+
+build CMakeFiles/package_source.util: CUSTOM_COMMAND
+  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D C:\Kursovaya\build && "C:\Program Files\CMake\bin\cpack.exe" --config ./CPackSourceConfig.cmake"
+  DESC = Run CPack packaging tool for source...
+  pool = console
+  restat = 1
+
+build package_source: phony CMakeFiles/package_source.util
 
 
 #############################################

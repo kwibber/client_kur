@@ -1,0 +1,3 @@
+C:/Kursovaya/build/_deps/freetype-subbuild/CMakeFiles/freetype-populate.dir
+C:/Kursovaya/build/_deps/freetype-subbuild/CMakeFiles/edit_cache.dir
+C:/Kursovaya/build/_deps/freetype-subbuild/CMakeFiles/rebuild_cache.dir

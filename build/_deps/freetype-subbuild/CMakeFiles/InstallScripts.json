@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/Kursovaya/build/_deps/freetype-subbuild/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
