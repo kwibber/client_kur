@@ -1,9 +1,0 @@
-# ninja log v7
-27	2830	7872603437432756	CMakeFiles/Kursovaya.dir/client.cpp.obj	790d58e4774e6aa4
-4113	6570	7874293500415312	Kursovaya.exe	7a7afd07ab241572
-24	13213	7874293766202149	build.ninja	67284ffe013ac735
-24	13213	7874293766202149	C:/Kursovaya/build/cmake_install.cmake	67284ffe013ac735
-25	4092	7874293459551639	CMakeFiles/Kursovaya.dir/main.cpp.obj	c5e3c053f91088d2
-31	4101	7874293459702183	CMakeFiles/Kursovaya.dir/device_managers.cpp.obj	4b149f9eedf3ee53
-35	4108	7874293459741146	CMakeFiles/Kursovaya.dir/console_manager.cpp.obj	97ef661663c67e2f
-28	4112	7874293459551639	CMakeFiles/Kursovaya.dir/opcua_client.cpp.obj	d1cb90fcdcc3cd40

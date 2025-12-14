@@ -1,5 +1,0 @@
-C:/Kursovaya/build/CMakeFiles/Kursovaya.dir
-C:/Kursovaya/build/CMakeFiles/package.dir
-C:/Kursovaya/build/CMakeFiles/package_source.dir
-C:/Kursovaya/build/CMakeFiles/edit_cache.dir
-C:/Kursovaya/build/CMakeFiles/rebuild_cache.dir
