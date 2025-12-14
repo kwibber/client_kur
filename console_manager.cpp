@@ -4,6 +4,7 @@
 #include <chrono>
 #include <thread>
 #include <ctime>
+#include <sstream>
 
 // Реализация ConsoleManager
 
@@ -22,6 +23,54 @@ void ConsoleManager::clearConsole() {
 #endif
 }
 
+void ConsoleManager::moveCursorToTop() {
+#ifdef _WIN32
+    static HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    COORD coord = {0, 0};
+    SetConsoleCursorPosition(hConsole, coord);
+#else
+    std::cout << "\033[H";
+#endif
+}
+
+void ConsoleManager::clearLine() {
+#ifdef _WIN32
+    static HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(hConsole, &csbi);
+    COORD coord = {0, csbi.dwCursorPosition.Y};
+    DWORD charsWritten;
+    FillConsoleOutputCharacter(hConsole, ' ', csbi.dwSize.X, coord, &charsWritten);
+    SetConsoleCursorPosition(hConsole, coord);
+#else
+    std::cout << "\033[2K\r";
+#endif
+}
+
+void ConsoleManager::hideCursor() {
+#ifdef _WIN32
+    static HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_CURSOR_INFO cursorInfo;
+    GetConsoleCursorInfo(hConsole, &cursorInfo);
+    cursorInfo.bVisible = false;
+    SetConsoleCursorInfo(hConsole, &cursorInfo);
+#else
+    std::cout << "\033[?25l";
+#endif
+}
+
+void ConsoleManager::showCursor() {
+#ifdef _WIN32
+    static HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_CURSOR_INFO cursorInfo;
+    GetConsoleCursorInfo(hConsole, &cursorInfo);
+    cursorInfo.bVisible = true;
+    SetConsoleCursorInfo(hConsole, &cursorInfo);
+#else
+    std::cout << "\033[?25h";
+#endif
+}
+
 void ConsoleManager::printWelcome() {
     std::cout << "Клиент OPC UA запускается..." << std::endl;
     std::cout << "Подключение к: opc.tcp://127.0.0.1:4840" << std::endl;
@@ -32,6 +81,7 @@ void ConsoleManager::printControls() {
     std::cout << "\nУправление:" << std::endl;
     std::cout << "  - 'q' - выход" << std::endl;
     std::cout << "  - 'r' - установить новые обороты маховика" << std::endl;
+    std::cout << "  - 'p' - пауза/продолжить обновление данных" << std::endl;
     std::cout << std::endl;
 }
 
@@ -49,8 +99,14 @@ bool ConsoleManager::isKeyPressed() {
 // Реализация OPCUAApplication
 
 OPCUAApplication::OPCUAApplication(const std::string& endpoint)
-    : client(endpoint), nodesFound(false), running(true) {
+    : client(endpoint), nodesFound(false), running(true), 
+      displayIntervalMs(16) {  // ~60 FPS (1000/60 = 16.67)
+    
     objectsFolder = OPCUANode(UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER), "Objects", "Objects Folder");
+}
+
+OPCUAApplication::~OPCUAApplication() {
+    shutdown();
 }
 
 bool OPCUAApplication::initialize() {
@@ -88,26 +144,66 @@ bool OPCUAApplication::initialize() {
         return false;
     }
 
+    // Инициализация асинхронного менеджера данных
+    asyncManager = std::make_unique<AsyncDataManager>(&client, &multimeter, &machine, &computer, 20); // 20 мс обновление данных
+    asyncManager->start();
+
     return true;
 }
 
 void OPCUAApplication::run() {
     std::cout << "\n\nНачало чтения значений..." << std::endl;
     ConsoleManager::printControls();
+    ConsoleManager::hideCursor(); // Скрываем курсор для плавного обновления
     
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     ConsoleManager::clearConsole();
 
+    auto lastDisplayTime = std::chrono::high_resolution_clock::now();
+    bool paused = false;
+    
     while (running) {
+        // Обработка ввода
         handleInput();
-        readAndDisplayValues();
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        
+        // Проверка на паузу
+        if (ConsoleManager::isKeyPressed()) {
+            char c = ConsoleManager::getKeyPress();
+            if (c == 'p' || c == 'P') {
+                paused = !paused;
+                std::cout << "\n" << (paused ? "Пауза" : "Продолжение") << std::endl;
+                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            }
+        }
+        
+        // Отображение данных, если не на паузе
+        if (!paused) {
+            auto currentTime = std::chrono::high_resolution_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                currentTime - lastDisplayTime).count();
+            
+            if (elapsed >= displayIntervalMs) {
+                readAndDisplayValues();
+                lastDisplayTime = currentTime;
+            } else {
+                // Минимальная задержка для экономии CPU
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        } else {
+            // На паузе - больше спим
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     }
 
     shutdown();
 }
 
 void OPCUAApplication::shutdown() {
+    if (asyncManager) {
+        asyncManager->stop();
+    }
+    
+    ConsoleManager::showCursor(); // Восстанавливаем курсор
     std::cout << "\nОтключение от сервера..." << std::endl;
     client.disconnect();
     std::cout << "Клиент остановлен." << std::endl;
@@ -138,9 +234,12 @@ void OPCUAApplication::handleRPMInput() {
         return;
     }
 
+    // Временно показываем курсор для ввода
+    ConsoleManager::showCursor();
     std::cout << "\nВведите новые обороты маховика (об/мин): ";
     std::string input;
     std::getline(std::cin, input);
+    ConsoleManager::hideCursor();
 
     try {
         double newRpm = std::stod(input);
@@ -156,68 +255,85 @@ void OPCUAApplication::handleRPMInput() {
 }
 
 void OPCUAApplication::readAndDisplayValues() {
-    ConsoleManager::clearConsole();
+    // Используем асинхронные данные
+    auto data = asyncManager->getCurrentData();
+    
+    // Перемещаем курсор в начало вместо полной очистки
+    static bool firstRun = true;
+    if (firstRun) {
+        ConsoleManager::clearConsole();
+        firstRun = false;
+    } else {
+        ConsoleManager::moveCursorToTop();
+    }
     
     auto now = std::chrono::system_clock::now();
     auto now_time = std::chrono::system_clock::to_time_t(now);
-    std::cout << "===========================================" << std::endl;
+    
+    // Быстрый вывод заголовка
+    std::cout << "===========================================\n";
     std::cout << "Данные OPC UA - " << std::ctime(&now_time);
-    std::cout << "===========================================" << std::endl;
+    std::cout << "Обновление: " 
+              << std::chrono::duration_cast<std::chrono::milliseconds>(
+                  now - data.lastUpdate).count() 
+              << " мс назад\n";
+    std::cout << "Частота: " << (1000 / displayIntervalMs) << " FPS\n";
+    std::cout << "===========================================\n";
     
-    displayAllDevices();
+    // Быстрый вывод данных
+    displayAllDevicesAsync(data);
     
-    std::cout << "===========================================" << std::endl;
+    std::cout << "===========================================\n";
     ConsoleManager::printControls();
+    std::cout.flush(); // Принудительный сброс буфера
 }
 
-void OPCUAApplication::displayAllDevices() {
-    bool hasMultimeter = multimeter.getDeviceNode().isValid();
-    bool hasMachine = machine.getDeviceNode().isValid();
-    bool hasComputer = computer.getDeviceNode().isValid();
+void OPCUAApplication::displayAllDevicesAsync(const DeviceData& data) {
+    // Используем буферизированный вывод для быстродействия
+    std::ostringstream buffer;
     
-    if (hasMultimeter) {
-        std::cout << "\n[МУЛЬТИМЕТР]" << std::endl;
-        auto multimeterValues = multimeter.readAllValues(client);
-        std::vector<std::string> multimeterNames = {"Напряжение", "Ток", "Сопротивление", "Мощность"};
-        std::vector<std::string> multimeterUnits = {"В", "А", "Ом", "Вт"};
+    if (data.multimeter.valid) {
+        buffer << "\n[МУЛЬТИМЕТР] ";
+        buffer << "(задержка: " 
+               << std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::system_clock::now() - data.multimeter.timestamp).count()
+               << " мс)\n";
         
-        for (size_t i = 0; i < multimeterValues.size() && i < multimeterNames.size(); i++) {
-            if (multimeterValues[i].first) {
-                std::cout << "  " << multimeterNames[i] << ": " 
-                          << std::fixed << std::setprecision(2) << multimeterValues[i].second 
-                          << " " << multimeterUnits[i] << std::endl;
-            }
-        }
+        buffer << "  Напряжение: " << std::fixed << std::setprecision(2) 
+               << data.multimeter.voltage << " В\n";
+        buffer << "  Ток: " << data.multimeter.current << " А\n";
+        buffer << "  Сопротивление: " << data.multimeter.resistance << " Ом\n";
+        buffer << "  Мощность: " << data.multimeter.power << " Вт\n";
     }
     
-    if (hasMachine) {
-        std::cout << "\n[СТАНОК]" << std::endl;
-        auto machineValues = machine.readAllValues(client);
-        std::vector<std::string> machineNames = {"Обороты маховика", "Мощность", "Напряжение", "Потребление энергии"};
-        std::vector<std::string> machineUnits = {"об/мин", "кВт", "В", "кВт·ч"};
+    if (data.machine.valid) {
+        buffer << "\n[СТАНОК] ";
+        buffer << "(задержка: " 
+               << std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::system_clock::now() - data.machine.timestamp).count()
+               << " мс)\n";
         
-        for (size_t i = 0; i < machineValues.size() && i < machineNames.size(); i++) {
-            if (machineValues[i].first) {
-                std::cout << "  " << machineNames[i] << ": " 
-                          << std::fixed << std::setprecision(2) << machineValues[i].second 
-                          << " " << machineUnits[i] << std::endl;
-            }
-        }
+        buffer << "  Обороты маховика: " << data.machine.rpm << " об/мин\n";
+        buffer << "  Мощность: " << data.machine.power << " кВт\n";
+        buffer << "  Напряжение: " << data.machine.voltage << " В\n";
+        buffer << "  Потребление энергии: " << data.machine.energy << " кВт·ч\n";
     }
     
-    if (hasComputer) {
-        std::cout << "\n[КОМПЬЮТЕР]" << std::endl;
-        auto computerValues = computer.readAllValues(client);
-        std::vector<std::string> computerNames = {"Вентилятор 1", "Вентилятор 2", "Вентилятор 3", 
-                                                 "Загрузка ЦП", "Загрузка ГП", "Использование ОЗУ"};
-        std::vector<std::string> computerUnits = {"об/мин", "об/мин", "об/мин", "%", "%", "%"};
+    if (data.computer.valid) {
+        buffer << "\n[КОМПЬЮТЕР] ";
+        buffer << "(задержка: " 
+               << std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::system_clock::now() - data.computer.timestamp).count()
+               << " мс)\n";
         
-        for (size_t i = 0; i < computerValues.size() && i < computerNames.size(); i++) {
-            if (computerValues[i].first) {
-                std::cout << "  " << computerNames[i] << ": " 
-                          << std::fixed << std::setprecision(2) << computerValues[i].second 
-                          << " " << computerUnits[i] << std::endl;
-            }
-        }
+        buffer << "  Вентилятор 1: " << data.computer.fan1 << " об/мин\n";
+        buffer << "  Вентилятор 2: " << data.computer.fan2 << " об/мин\n";
+        buffer << "  Вентилятор 3: " << data.computer.fan3 << " об/мин\n";
+        buffer << "  Загрузка ЦП: " << data.computer.cpuLoad << " %\n";
+        buffer << "  Загрузка ГП: " << data.computer.gpuLoad << " %\n";
+        buffer << "  Использование ОЗУ: " << data.computer.ramUsage << " %\n";
     }
+    
+    // Выводим весь буфер сразу
+    std::cout << buffer.str();
 }

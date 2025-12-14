@@ -3,16 +3,22 @@
 
 #include "opcua_client.h"
 #include "device_managers.h"
+#include "async_manager.h"  // Добавляем этот include
 #include <conio.h>
 #include <windows.h>
 #include <string>
 #include <atomic>
+#include <memory>
 
 // Класс для работы с консолью
 class ConsoleManager {
 public:
     static void setupConsole();
     static void clearConsole();
+    static void moveCursorToTop();
+    static void clearLine();
+    static void hideCursor();
+    static void showCursor();
     static void printWelcome();
     static void printControls();
     static char getKeyPress();
@@ -30,9 +36,15 @@ private:
     OPCUANode objectsFolder;
     bool nodesFound;
     std::atomic<bool> running;
+    
+    // Добавляем асинхронный менеджер
+    std::unique_ptr<AsyncDataManager> asyncManager;
+    int displayIntervalMs;  // Интервал отображения в мс
 
 public:
     OPCUAApplication(const std::string& endpoint = "opc.tcp://127.0.0.1:4840");
+    ~OPCUAApplication();
+    
     bool initialize();
     void run();
     void shutdown();
@@ -41,7 +53,7 @@ private:
     void handleInput();
     void handleRPMInput();
     void readAndDisplayValues();
-    void displayAllDevices();
+    void displayAllDevicesAsync(const DeviceData& data);
 };
 
 #endif // CONSOLE_MANAGER_H

@@ -30,8 +30,7 @@ private:
 std::atomic<bool> SignalHandler::running(true);
 
 int main() {
-    // Настройка кодировки консоли
-    ConsoleManager::setupConsole();
+    SignalHandler::initialize();
     
     OPCUAApplication app;
     
