@@ -40,6 +40,8 @@ private:
     OPCUANode powerNode;
     OPCUANode voltageNode;
     OPCUANode energyConsumptionNode;
+    OPCUANode targetRPMNode;          // Для записи целевых оборотов
+    OPCUANode rpmControlModeNode;     // Для управления режимом
     std::vector<OPCUANode> allNodes;
 
 public:
@@ -48,7 +50,8 @@ public:
     bool readValues(OPCUAClient& client, double& rpm, double& power, 
                     double& voltage, double& energy) const;
     std::vector<std::pair<bool, double>> readAllValues(OPCUAClient& client) const;
-    bool setRPMValue(OPCUAClient& client, double rpm);
+    bool setTargetRPM(OPCUAClient& client, double rpm);  // Новый метод для записи целевых оборотов
+    bool setControlMode(OPCUAClient& client, int mode);  // Новый метод для изменения режима
     void printStatus() const;
     
     const OPCUANode& getDeviceNode() const;
@@ -56,6 +59,9 @@ public:
     const OPCUANode& getPowerNode() const;
     const OPCUANode& getVoltageNode() const;
     const OPCUANode& getEnergyConsumptionNode() const;
+    const OPCUANode& getTargetRPMNode() const;      // Новый метод
+    const OPCUANode& getControlModeNode() const;    // Новый метод
+    const std::vector<OPCUANode>& getAllNodes() const;
 };
 
 // Класс для управления устройством "Компьютер"
@@ -79,6 +85,7 @@ public:
     void printStatus() const;
     
     const OPCUANode& getDeviceNode() const;
+    const std::vector<OPCUANode>& getAllNodes() const;
 };
 
 #endif // DEVICE_MANAGERS_H

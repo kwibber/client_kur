@@ -7,24 +7,83 @@
 #include <chrono>
 #include <thread>
 
-// Базовый класс для обработки сигналов
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+// Глобальный указатель на приложение для обработки сигналов
+namespace {
+    OPCUAApplication* g_app = nullptr;
+    std::atomic<bool> g_shutdownRequested{false};
+}
+
+// Класс для обработки сигналов
 class SignalHandler {
 private:
     static std::atomic<bool> running;
 
 public:
     static void initialize() {
+        // Устанавливаем обработчики для POSIX сигналов
         std::signal(SIGINT, signalHandler);
         std::signal(SIGTERM, signalHandler);
+        
+#ifdef _WIN32
+        // Для Windows дополнительно устанавливаем обработчик событий консоли
+        SetConsoleCtrlHandler(consoleCtrlHandler, TRUE);
+#endif
     }
 
     static bool isRunning() { return running; }
-    static void stop() { running = false; }
+    static void stop() { 
+        running = false;
+        g_shutdownRequested = true;
+        
+        // Уведомляем приложение о необходимости остановки
+        if (g_app) {
+            // Запускаем остановку в отдельном потоке, чтобы избежать блокировок
+            std::thread shutdownThread([]() {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                if (g_app) {
+                    // Вызываем shutdown через указатель на метод
+                    g_app->shutdown();
+                }
+            });
+            shutdownThread.detach();
+        }
+    }
 
 private:
     static void signalHandler(int signal) {
-        running = false;
+        std::cout << "\nПолучен сигнал " << signal << ". Завершение работы..." << std::endl;
+        stop();
     }
+
+#ifdef _WIN32
+    static BOOL WINAPI consoleCtrlHandler(DWORD ctrlType) {
+        switch (ctrlType) {
+            case CTRL_C_EVENT:
+                std::cout << "\nПолучен Ctrl+C. Завершение работы..." << std::endl;
+                break;
+            case CTRL_BREAK_EVENT:
+                std::cout << "\nПолучен Ctrl+Break. Завершение работы..." << std::endl;
+                break;
+            case CTRL_CLOSE_EVENT:
+                std::cout << "\nЗакрытие консоли. Завершение работы..." << std::endl;
+                break;
+            case CTRL_LOGOFF_EVENT:
+                std::cout << "\nВыход пользователя из системы. Завершение работы..." << std::endl;
+                break;
+            case CTRL_SHUTDOWN_EVENT:
+                std::cout << "\nЗавершение работы системы. Завершение работы..." << std::endl;
+                break;
+            default:
+                break;
+        }
+        stop();
+        return TRUE; // Обработчик принял событие
+    }
+#endif
 };
 
 std::atomic<bool> SignalHandler::running(true);
@@ -32,14 +91,72 @@ std::atomic<bool> SignalHandler::running(true);
 int main() {
     SignalHandler::initialize();
     
-    OPCUAApplication app;
+    std::cout << "===========================================" << std::endl;
+    std::cout << "Запуск OPC UA клиента" << std::endl;
+    std::cout << "Версия: 1.0" << std::endl;
+    std::cout << "===========================================\n" << std::endl;
     
-    if (!app.initialize()) {
-        std::cerr << "Ошибка инициализации приложения." << std::endl;
+    try {
+        OPCUAApplication app;
+        g_app = &app; // Сохраняем указатель для обработки сигналов
+        
+        if (!app.initialize()) {
+            std::cerr << "Ошибка инициализации приложения." << std::endl;
+            std::cerr << "Возможные причины:" << std::endl;
+            std::cerr << "1. Сервер OPC UA не запущен" << std::endl;
+            std::cerr << "2. Неверный адрес сервера" << std::endl;
+            std::cerr << "3. Проблемы с сетью" << std::endl;
+            std::cerr << "Проверьте, что сервер запущен по адресу: opc.tcp://127.0.0.1:4840" << std::endl;
+            return 1;
+        }
+        
+        std::cout << "\nПриложение успешно инициализировано." << std::endl;
+        std::cout << "Для выхода нажмите Ctrl+C или 'q' в программе." << std::endl;
+        
+        // Запускаем приложение в отдельном потоке
+        std::thread appThread([&app]() {
+            app.run();
+        });
+        
+        // Главный поток отслеживает запрос на завершение
+        while (!g_shutdownRequested && SignalHandler::isRunning()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            
+            // Дополнительная проверка для корректного завершения
+            if (!appThread.joinable()) {
+                break;
+            }
+        }
+        
+        // Если был запрос на завершение, но приложение еще работает
+        if (g_shutdownRequested && appThread.joinable()) {
+            std::cout << "\nЗавершение приложения..." << std::endl;
+            
+            // Даем время на корректное завершение
+            for (int i = 0; i < 10 && appThread.joinable(); i++) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        }
+        
+        // Ожидаем завершения потока приложения
+        if (appThread.joinable()) {
+            appThread.join();
+        }
+        
+        std::cout << "\n===========================================" << std::endl;
+        std::cout << "OPC UA клиент успешно завершил работу." << std::endl;
+        std::cout << "===========================================" << std::endl;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "\nКритическая ошибка: " << e.what() << std::endl;
+        return 1;
+    } catch (...) {
+        std::cerr << "\nНеизвестная критическая ошибка" << std::endl;
         return 1;
     }
     
-    app.run();
+    // Сброс глобального указателя
+    g_app = nullptr;
     
     return 0;
 }

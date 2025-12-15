@@ -85,6 +85,10 @@ bool MachineDevice::initialize(OPCUAClient& client, const OPCUANode& parentNode)
             voltageNode = component;
         } else if (component.getBrowseName() == "EnergyConsumption") {
             energyConsumptionNode = component;
+        } else if (component.getBrowseName() == "TargetRPM") {
+            targetRPMNode = component;
+        } else if (component.getBrowseName() == "RPMControlMode") {
+            rpmControlModeNode = component;
         }
     }
 
@@ -94,7 +98,8 @@ bool MachineDevice::initialize(OPCUAClient& client, const OPCUANode& parentNode)
     if (energyConsumptionNode.isValid()) allNodes.push_back(energyConsumptionNode);
 
     return flywheelRPMNode.isValid() || powerNode.isValid() || 
-           voltageNode.isValid() || energyConsumptionNode.isValid();
+           voltageNode.isValid() || energyConsumptionNode.isValid() ||
+           targetRPMNode.isValid() || rpmControlModeNode.isValid();
 }
 
 bool MachineDevice::readValues(OPCUAClient& client, double& rpm, double& power, 
@@ -111,8 +116,21 @@ std::vector<std::pair<bool, double>> MachineDevice::readAllValues(OPCUAClient& c
     return client.readMultipleValues(allNodes);
 }
 
-bool MachineDevice::setRPMValue(OPCUAClient& client, double rpm) {
-    return client.writeValue(flywheelRPMNode, rpm);
+bool MachineDevice::setTargetRPM(OPCUAClient& client, double rpm) {
+    if (!targetRPMNode.isValid()) {
+        std::cerr << "TargetRPM node not found" << std::endl;
+        return false;
+    }
+    return client.writeValue(targetRPMNode, rpm);
+}
+
+bool MachineDevice::setControlMode(OPCUAClient& client, int mode) {
+    if (!rpmControlModeNode.isValid()) {
+        std::cerr << "RPMControlMode node not found" << std::endl;
+        return false;
+    }
+    double modeValue = static_cast<double>(mode);
+    return client.writeValue(rpmControlModeNode, modeValue);
 }
 
 void MachineDevice::printStatus() const {
@@ -120,7 +138,9 @@ void MachineDevice::printStatus() const {
     if (flywheelRPMNode.isValid()) std::cout << "Обороты доступны, ";
     if (powerNode.isValid()) std::cout << "Мощность доступна, ";
     if (voltageNode.isValid()) std::cout << "Напряжение доступно, ";
-    if (energyConsumptionNode.isValid()) std::cout << "Энергопотребление доступно";
+    if (energyConsumptionNode.isValid()) std::cout << "Энергопотребление доступно, ";
+    if (targetRPMNode.isValid()) std::cout << "Целевые обороты доступны (для записи), ";
+    if (rpmControlModeNode.isValid()) std::cout << "Режим управления доступен (для записи)";
     std::cout << std::endl;
 }
 
@@ -129,6 +149,9 @@ const OPCUANode& MachineDevice::getFlywheelRPMNode() const { return flywheelRPMN
 const OPCUANode& MachineDevice::getPowerNode() const { return powerNode; }
 const OPCUANode& MachineDevice::getVoltageNode() const { return voltageNode; }
 const OPCUANode& MachineDevice::getEnergyConsumptionNode() const { return energyConsumptionNode; }
+const OPCUANode& MachineDevice::getTargetRPMNode() const { return targetRPMNode; }
+const OPCUANode& MachineDevice::getControlModeNode() const { return rpmControlModeNode; }
+const std::vector<OPCUANode>& MachineDevice::getAllNodes() const { return allNodes; }
 
 // Реализация ComputerDevice
 
@@ -197,3 +220,4 @@ void ComputerDevice::printStatus() const {
 }
 
 const OPCUANode& ComputerDevice::getDeviceNode() const { return deviceNode; }
+const std::vector<OPCUANode>& ComputerDevice::getAllNodes() const { return allNodes; }

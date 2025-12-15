@@ -3,7 +3,7 @@
 
 #include "opcua_client.h"
 #include "device_managers.h"
-#include "async_manager.h"  // Добавляем этот include
+#include "async_manager.h"
 #include <conio.h>
 #include <windows.h>
 #include <string>
@@ -36,24 +36,34 @@ private:
     OPCUANode objectsFolder;
     bool nodesFound;
     std::atomic<bool> running;
+    std::atomic<bool> connectionLost;
     
     // Добавляем асинхронный менеджер
     std::unique_ptr<AsyncDataManager> asyncManager;
     int displayIntervalMs;  // Интервал отображения в мс
+    
+    // Добавляем счетчик попыток переподключения
+    int reconnectAttempts;
+    const int maxReconnectAttempts = 10;
 
 public:
     OPCUAApplication(const std::string& endpoint = "opc.tcp://127.0.0.1:4840");
     ~OPCUAApplication();
     
     bool initialize();
+    bool reconnect();  // Новый метод для переподключения
     void run();
     void shutdown();
+    
+    bool checkConnection();  // Проверка соединения
 
 private:
     void handleInput();
     void handleRPMInput();
+    void handleControlModeInput();  // Новый метод
     void readAndDisplayValues();
     void displayAllDevicesAsync(const DeviceData& data);
+    void displayConnectionStatus();  // Новый метод
 };
 
 #endif // CONSOLE_MANAGER_H

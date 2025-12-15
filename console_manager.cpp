@@ -81,6 +81,7 @@ void ConsoleManager::printControls() {
     std::cout << "\nУправление:" << std::endl;
     std::cout << "  - 'q' - выход" << std::endl;
     std::cout << "  - 'r' - установить новые обороты маховика" << std::endl;
+    std::cout << "  - 'm' - переключить режим управления (авто/ручной)" << std::endl;
     std::cout << "  - 'p' - пауза/продолжить обновление данных" << std::endl;
     std::cout << std::endl;
 }
@@ -100,7 +101,8 @@ bool ConsoleManager::isKeyPressed() {
 
 OPCUAApplication::OPCUAApplication(const std::string& endpoint)
     : client(endpoint), nodesFound(false), running(true), 
-      displayIntervalMs(16) {  // ~60 FPS (1000/60 = 16.67)
+      connectionLost(false), displayIntervalMs(16),
+      reconnectAttempts(0) {
     
     objectsFolder = OPCUANode(UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER), "Objects", "Objects Folder");
 }
@@ -114,6 +116,7 @@ bool OPCUAApplication::initialize() {
     ConsoleManager::printWelcome();
 
     if (!client.connect()) {
+        std::cerr << "Не удалось подключиться к серверу" << std::endl;
         return false;
     }
 
@@ -145,24 +148,90 @@ bool OPCUAApplication::initialize() {
     }
 
     // Инициализация асинхронного менеджера данных
-    asyncManager = std::make_unique<AsyncDataManager>(&client, &multimeter, &machine, &computer, 20); // 20 мс обновление данных
+    asyncManager = std::make_unique<AsyncDataManager>(&client, &multimeter, &machine, &computer, 20);
     asyncManager->start();
 
     return true;
 }
 
+bool OPCUAApplication::reconnect() {
+    if (reconnectAttempts >= maxReconnectAttempts) {
+        std::cerr << "Достигнуто максимальное количество попыток переподключения" << std::endl;
+        return false;
+    }
+    
+    reconnectAttempts++;
+    std::cout << "\nПопытка переподключения #" << reconnectAttempts << "..." << std::endl;
+    
+    // Останавливаем асинхронный менеджер
+    if (asyncManager) {
+        asyncManager->stop();
+        asyncManager.reset();
+    }
+    
+    // Закрываем соединение
+    client.disconnect();
+    
+    // Пауза перед повторной попыткой
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    
+    // Пробуем подключиться
+    if (client.connect()) {
+        // Переинициализируем устройства
+        multimeter.initialize(client, objectsFolder);
+        machine.initialize(client, objectsFolder);
+        computer.initialize(client, objectsFolder);
+        
+        // Запускаем асинхронный менеджер
+        asyncManager = std::make_unique<AsyncDataManager>(&client, &multimeter, &machine, &computer, 20);
+        asyncManager->start();
+        
+        reconnectAttempts = 0;
+        connectionLost = false;
+        std::cout << "Переподключение успешно!" << std::endl;
+        return true;
+    }
+    
+    return false;
+}
+
+bool OPCUAApplication::checkConnection() {
+    bool connected = client.isConnected();
+    if (!connected && !connectionLost) {
+        connectionLost = true;
+        std::cerr << "\nПотеряно соединение с сервером!" << std::endl;
+    }
+    return connected;
+}
+
 void OPCUAApplication::run() {
     std::cout << "\n\nНачало чтения значений..." << std::endl;
     ConsoleManager::printControls();
-    ConsoleManager::hideCursor(); // Скрываем курсор для плавного обновления
+    ConsoleManager::hideCursor();
     
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     ConsoleManager::clearConsole();
 
     auto lastDisplayTime = std::chrono::high_resolution_clock::now();
+    auto lastConnectionCheck = std::chrono::high_resolution_clock::now();
     bool paused = false;
     
     while (running) {
+        // Проверка соединения каждые 2 секунды
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        auto elapsedCheck = std::chrono::duration_cast<std::chrono::milliseconds>(
+            currentTime - lastConnectionCheck).count();
+        
+        if (elapsedCheck >= 2000) {
+            if (!checkConnection() && connectionLost) {
+                if (!reconnect()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+                    continue;
+                }
+            }
+            lastConnectionCheck = currentTime;
+        }
+        
         // Обработка ввода
         handleInput();
         
@@ -176,9 +245,8 @@ void OPCUAApplication::run() {
             }
         }
         
-        // Отображение данных, если не на паузе
-        if (!paused) {
-            auto currentTime = std::chrono::high_resolution_clock::now();
+        // Отображение данных, если не на паузе и есть соединение
+        if (!paused && !connectionLost) {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 currentTime - lastDisplayTime).count();
             
@@ -186,12 +254,17 @@ void OPCUAApplication::run() {
                 readAndDisplayValues();
                 lastDisplayTime = currentTime;
             } else {
-                // Минимальная задержка для экономии CPU
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         } else {
-            // На паузе - больше спим
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (connectionLost) {
+                ConsoleManager::clearConsole();
+                std::cout << "СОЕДИНЕНИЕ ПОТЕРЯНО" << std::endl;
+                std::cout << "Попытка переподключения..." << std::endl;
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
         }
     }
 
@@ -203,7 +276,7 @@ void OPCUAApplication::shutdown() {
         asyncManager->stop();
     }
     
-    ConsoleManager::showCursor(); // Восстанавливаем курсор
+    ConsoleManager::showCursor();
     std::cout << "\nОтключение от сервера..." << std::endl;
     client.disconnect();
     std::cout << "Клиент остановлен." << std::endl;
@@ -224,19 +297,23 @@ void OPCUAApplication::handleInput() {
             case 'R':
                 handleRPMInput();
                 break;
+                
+            case 'm':
+            case 'M':  // Добавляем управление режимом
+                handleControlModeInput();
+                break;
         }
     }
 }
 
 void OPCUAApplication::handleRPMInput() {
-    if (!machine.getFlywheelRPMNode().isValid()) {
-        std::cerr << "\nУзел оборотов маховика не найден, невозможно установить значение." << std::endl;
+    if (!machine.getTargetRPMNode().isValid()) {
+        std::cerr << "\nУзел целевых оборотов не найден" << std::endl;
         return;
     }
 
-    // Временно показываем курсор для ввода
     ConsoleManager::showCursor();
-    std::cout << "\nВведите новые обороты маховика (об/мин): ";
+    std::cout << "\nВведите новые обороты маховика (0-3000 об/мин): ";
     std::string input;
     std::getline(std::cin, input);
     ConsoleManager::hideCursor();
@@ -244,10 +321,46 @@ void OPCUAApplication::handleRPMInput() {
     try {
         double newRpm = std::stod(input);
         
-        if (machine.setRPMValue(client, newRpm)) {
-            std::cout << "Успешно установлены обороты: " << newRpm << " об/мин" << std::endl;
+        // Проверка диапазона
+        if (newRpm < 0.0) newRpm = 0.0;
+        if (newRpm > 3000.0) newRpm = 3000.0;
+        
+        if (machine.setTargetRPM(client, newRpm)) {
+            std::cout << "Успешно установлены целевые обороты: " << newRpm << " об/мин" << std::endl;
         } else {
             std::cerr << "Ошибка записи значения оборотов" << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Неверный ввод: " << e.what() << std::endl;
+    }
+}
+
+void OPCUAApplication::handleControlModeInput() {
+    if (!machine.getControlModeNode().isValid()) {
+        std::cerr << "\nУзел режима управления не найден" << std::endl;
+        return;
+    }
+
+    ConsoleManager::showCursor();
+    std::cout << "\nВыберите режим управления:" << std::endl;
+    std::cout << "  0 - Автоматический режим" << std::endl;
+    std::cout << "  1 - Ручной режим" << std::endl;
+    std::cout << "Введите значение (0 или 1): ";
+    std::string input;
+    std::getline(std::cin, input);
+    ConsoleManager::hideCursor();
+
+    try {
+        int mode = std::stoi(input);
+        
+        if (mode == 0 || mode == 1) {
+            if (machine.setControlMode(client, mode)) {
+                std::cout << "Режим управления изменен на: " << (mode == 0 ? "АВТОМАТИЧЕСКИЙ" : "РУЧНОЙ") << std::endl;
+            } else {
+                std::cerr << "Ошибка изменения режима управления" << std::endl;
+            }
+        } else {
+            std::cerr << "Недопустимое значение. Допустимы только 0 или 1." << std::endl;
         }
     } catch (const std::exception& e) {
         std::cerr << "Неверный ввод: " << e.what() << std::endl;
@@ -258,7 +371,7 @@ void OPCUAApplication::readAndDisplayValues() {
     // Используем асинхронные данные
     auto data = asyncManager->getCurrentData();
     
-    // Перемещаем курсор в начало вместо полной очистки
+    // Перемещаем курсор в начало
     static bool firstRun = true;
     if (firstRun) {
         ConsoleManager::clearConsole();
@@ -278,18 +391,27 @@ void OPCUAApplication::readAndDisplayValues() {
                   now - data.lastUpdate).count() 
               << " мс назад\n";
     std::cout << "Частота: " << (1000 / displayIntervalMs) << " FPS\n";
+    
+    // Отображение статуса соединения
+    std::cout << "Статус: " << (connectionLost ? "ОТКЛЮЧЕНО" : "ПОДКЛЮЧЕНО") << "\n";
+    
     std::cout << "===========================================\n";
     
     // Быстрый вывод данных
     displayAllDevicesAsync(data);
     
+    // Вывод инструкций по управлению
+    std::cout << "\nУправление станциком:\n";
+    std::cout << "  'r' - задать обороты (0-3000 об/мин)\n";
+    std::cout << "  'm' - выбрать режим (0=авто, 1=ручной)\n";
+    std::cout << "  'p' - пауза/продолжить\n";
+    std::cout << "  'q' - выход\n";
     std::cout << "===========================================\n";
-    ConsoleManager::printControls();
-    std::cout.flush(); // Принудительный сброс буфера
+    
+    std::cout.flush();
 }
 
 void OPCUAApplication::displayAllDevicesAsync(const DeviceData& data) {
-    // Используем буферизированный вывод для быстродействия
     std::ostringstream buffer;
     
     if (data.multimeter.valid) {
@@ -304,6 +426,8 @@ void OPCUAApplication::displayAllDevicesAsync(const DeviceData& data) {
         buffer << "  Ток: " << data.multimeter.current << " А\n";
         buffer << "  Сопротивление: " << data.multimeter.resistance << " Ом\n";
         buffer << "  Мощность: " << data.multimeter.power << " Вт\n";
+    } else {
+        buffer << "\n[МУЛЬТИМЕТР] Нет данных\n";
     }
     
     if (data.machine.valid) {
@@ -317,6 +441,8 @@ void OPCUAApplication::displayAllDevicesAsync(const DeviceData& data) {
         buffer << "  Мощность: " << data.machine.power << " кВт\n";
         buffer << "  Напряжение: " << data.machine.voltage << " В\n";
         buffer << "  Потребление энергии: " << data.machine.energy << " кВт·ч\n";
+    } else {
+        buffer << "\n[СТАНОК] Нет данных\n";
     }
     
     if (data.computer.valid) {
@@ -332,8 +458,9 @@ void OPCUAApplication::displayAllDevicesAsync(const DeviceData& data) {
         buffer << "  Загрузка ЦП: " << data.computer.cpuLoad << " %\n";
         buffer << "  Загрузка ГП: " << data.computer.gpuLoad << " %\n";
         buffer << "  Использование ОЗУ: " << data.computer.ramUsage << " %\n";
+    } else {
+        buffer << "\n[КОМПЬЮТЕР] Нет данных\n";
     }
     
-    // Выводим весь буфер сразу
     std::cout << buffer.str();
 }
