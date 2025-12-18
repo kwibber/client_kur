@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <memory>
+#include <set>
 #include <chrono>
 #include <vector>
 #include <map>
@@ -13,6 +14,7 @@
 #include "opcua_client.h"
 #include "device_managers.h"
 #include "async_manager.h"
+
 
 class SimpleWindow {
 public:
@@ -23,6 +25,13 @@ public:
     void run();
 
 private:
+
+    // ===== Структура для правой панели =====
+    struct RightPanelAttribute {
+        std::string name;
+        std::string displayName;
+        double value;
+    };
     // Структура для хранения атрибута
     struct Attribute {
         std::string name;
@@ -81,7 +90,9 @@ private:
     std::vector<Attribute> computerAttributes;
     
     // Данные для правой панели (сгруппированные по устройствам)
-    std::map<std::string, std::vector<Attribute>> rightPanelData;
+    std::map<std::string, std::vector<RightPanelAttribute>> rightPanelData;
+    std::set<std::string> rightPanelSelection;
+
 
     // ===== Time =====
     std::chrono::steady_clock::time_point lastUpdate;

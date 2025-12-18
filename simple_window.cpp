@@ -10,6 +10,46 @@
 #include "async_manager.h"
 
 static std::set<std::string> rightPanelSelection;
+constexpr unsigned ATTR_FONT_SIZE = 20;
+constexpr float ATTR_LINE_HEIGHT = 38.f;
+constexpr float LEFT_PANEL_START_Y = 130.f;
+constexpr float DEVICE_ITEM_HEIGHT = 30.f;
+
+constexpr float RP_X        = 750.f;
+constexpr float RP_WIDTH    = 410.f;
+constexpr float ROW_H    = 28.f;
+constexpr float NAME_COL_W  = 230.f;
+constexpr float VALUE_COL_W = 120.f;
+
+static std::string formatValue(double v)
+{
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(2) << v;
+    return ss.str();
+}
+
+sf::String clampTextUtf8(const std::string& s, std::size_t maxChars)
+{
+    sf::String str = sf::String::fromUtf8(s.begin(), s.end());
+    if (str.getSize() <= maxChars)
+        return str;
+
+    sf::String result;
+    for (std::size_t i = 0; i < maxChars - 3; ++i)
+        result += str[i];
+
+    result += "...";
+    return result;
+}
+
+
+
+
+struct RightPanelAttribute {
+    std::string name;
+    std::string displayName;
+    double value;
+};
 
 // ================== Constructor ==================
 
@@ -19,28 +59,29 @@ SimpleWindow::SimpleWindow()
 {
     window.setVerticalSyncEnabled(true);
 
-    serverBox.setSize({420.f, 36.f});
+    serverBox.setSize({
+    window.getSize().x - 145.f, 48.f});
     serverBox.setPosition({20.f, 10.f});
     serverBox.setFillColor(panel);
 
-    leftPanel.setSize({320.f, 600.f});
-    leftPanel.setPosition({20.f, 60.f});
+    leftPanel.setSize({450.f, window.getSize().y - 120.f});
+    leftPanel.setPosition({20.f, 75.f});
     leftPanel.setFillColor(panel);
 
-    rightPanel.setSize({520.f, 600.f});
-    rightPanel.setPosition({780.f, 60.f});
+    rightPanel.setSize({450.f, window.getSize().y - 120.f});
+    rightPanel.setPosition({730.f, 75.f});
     rightPanel.setFillColor(panel);
 
-    moveRightBtn.setSize({80.f, 40.f});
-    moveRightBtn.setPosition({550.f, 300.f});
+    moveRightBtn.setSize({180.f, 60.f});
+    moveRightBtn.setPosition(sf::Vector2f(static_cast<float>(window.getSize().x) / 2.f - 90.f, window.getSize().y / 2.f - 110.f));
     moveRightBtn.setFillColor(accent);
 
-    moveLeftBtn.setSize({80.f, 40.f});
-    moveLeftBtn.setPosition({550.f, 360.f});
+    moveLeftBtn.setSize({180.f, 60.f});
+    moveLeftBtn.setPosition(sf::Vector2f(static_cast<float>(window.getSize().x) / 2.f - 90.f, window.getSize().y / 2.f - 30.f));
     moveLeftBtn.setFillColor(accent);
 
-    clearAllBtn.setSize({80.f, 40.f});
-    clearAllBtn.setPosition({550.f, 420.f});
+    clearAllBtn.setSize({180.f, 60.f});
+    clearAllBtn.setPosition(sf::Vector2f(static_cast<float>(window.getSize().x) / 2.f - 90.f, window.getSize().y / 2.f + 50.f));
     clearAllBtn.setFillColor(sf::Color(180, 70, 70));
 
     initializeAttributes();
@@ -120,7 +161,7 @@ void SimpleWindow::handleEvents()
                 return;
             }
 
-            // ===== Добавить выбранные атрибуты =====
+            // ===== Центр кнопки =====
             if (isMouseOver(moveRightBtn)) {
                 for (const auto& a : multimeterAttributes)
                     if (a.isSelected) addAttributeToRightPanel("Мультиметр", a);
@@ -131,7 +172,6 @@ void SimpleWindow::handleEvents()
                 return;
             }
 
-            // ===== Удалить выбранные в правой панели =====
             if (isMouseOver(moveLeftBtn)) {
                 for (const auto& fullName : rightPanelSelection) {
                     removeAttributeFromRightPanel(fullName);
@@ -140,7 +180,6 @@ void SimpleWindow::handleEvents()
                 return;
             }
 
-            // ===== Очистить всё =====
             if (isMouseOver(clearAllBtn)) {
                 rightPanelData.clear();
                 rightPanelSelection.clear();
@@ -153,82 +192,74 @@ void SimpleWindow::handleEvents()
             if (!connected || !devicesInitialized)
                 continue;
 
-            // ===== Левая панель (устройства + атрибуты) =====
-            float y = 100.f;
-            const float itemH = 30.f;
+            // ===== Левая панель =====
+            if (mouse.x >= leftPanel.getPosition().x && mouse.x <= leftPanel.getPosition().x + leftPanel.getSize().x) {
+                float y = LEFT_PANEL_START_Y;
+                const float itemH = DEVICE_ITEM_HEIGHT;
 
-            auto toggleDevice = [&](DeviceType d) {
-                auto it = std::find(expandedDevices.begin(), expandedDevices.end(), d);
-                if (it != expandedDevices.end())
-                    expandedDevices.erase(it);
-                else
-                    expandedDevices.push_back(d);
-            };
+                auto toggleDevice = [&](DeviceType d) {
+                    auto it = std::find(expandedDevices.begin(), expandedDevices.end(), d);
+                    if (it != expandedDevices.end())
+                        expandedDevices.erase(it);
+                    else
+                        expandedDevices.push_back(d);
+                };
 
-            auto deviceHit = [&](float yy) {
-                return mouse.x >= 40 && mouse.x <= 380 &&
-                       mouse.y >= yy && mouse.y <= yy + itemH;
-            };
+                auto deviceHit = [&](float yy) {
+                    return mouse.y >= yy && mouse.y <= yy + itemH;
+                };
 
-            // --- Мультиметр ---
-            if (deviceHit(y)) toggleDevice(MULTIMETER);
-            bool mExp = std::find(expandedDevices.begin(), expandedDevices.end(), MULTIMETER) != expandedDevices.end();
-            y += itemH;
+                // --- Мультиметр ---
+                if (deviceHit(y)) toggleDevice(MULTIMETER);
+                bool mExp = std::find(expandedDevices.begin(), expandedDevices.end(), MULTIMETER) != expandedDevices.end();
+                y += itemH;
 
-            if (mExp) {
-                for (auto& a : multimeterAttributes) {
-                    if (mouse.x >= 60 && mouse.x <= 360 &&
-                        mouse.y >= y && mouse.y <= y + 25)
-                    {
-                        a.isSelected = !a.isSelected;
+                if (mExp) {
+                    for (auto& a : multimeterAttributes) {
+                        if (mouse.y >= y && mouse.y <= y + ATTR_LINE_HEIGHT)
+                            a.isSelected = !a.isSelected;
+                        y += ATTR_LINE_HEIGHT;
                     }
-                    y += 30.f;
+                }
+
+                // --- Станок ---
+                if (deviceHit(y)) toggleDevice(MACHINE);
+                bool maExp = std::find(expandedDevices.begin(), expandedDevices.end(), MACHINE) != expandedDevices.end();
+                y += itemH;
+
+                if (maExp) {
+                    for (auto& a : machineAttributes) {
+                        if (mouse.y >= y && mouse.y <= y + ATTR_LINE_HEIGHT)
+                            a.isSelected = !a.isSelected;
+                        y += ATTR_LINE_HEIGHT;
+                    }
+                }
+
+                // --- Компьютер ---
+                if (deviceHit(y)) toggleDevice(COMPUTER);
+                bool cExp = std::find(expandedDevices.begin(), expandedDevices.end(), COMPUTER) != expandedDevices.end();
+                y += itemH;
+
+                if (cExp) {
+                    for (auto& a : computerAttributes) {
+                        if (mouse.y >= y && mouse.y <= y + ATTR_LINE_HEIGHT)
+                            a.isSelected = !a.isSelected;
+                        y += ATTR_LINE_HEIGHT;
+                    }
                 }
             }
 
-            // --- Станок ---
-            if (deviceHit(y)) toggleDevice(MACHINE);
-            bool maExp = std::find(expandedDevices.begin(), expandedDevices.end(), MACHINE) != expandedDevices.end();
-            y += itemH;
-
-            if (maExp) {
-                for (auto& a : machineAttributes) {
-                    if (mouse.x >= 60 && mouse.x <= 360 &&
-                        mouse.y >= y && mouse.y <= y + 25)
-                    {
-                        a.isSelected = !a.isSelected;
-                    }
-                    y += 30.f;
-                }
-            }
-
-            // --- Компьютер ---
-            if (deviceHit(y)) toggleDevice(COMPUTER);
-            bool cExp = std::find(expandedDevices.begin(), expandedDevices.end(), COMPUTER) != expandedDevices.end();
-            y += itemH;
-
-            if (cExp) {
-                for (auto& a : computerAttributes) {
-                    if (mouse.x >= 60 && mouse.x <= 360 &&
-                        mouse.y >= y && mouse.y <= y + 25)
-                    {
-                        a.isSelected = !a.isSelected;
-                    }
-                    y += 30.f;
-                }
-            }
-
-            // ===== Правая панель (выбор атрибутов) =====
-            float ry = 140.f;
+            // ===== Правая панель =====
+            float ry = 130.f;
 
             for (auto& [deviceName, attributes] : rightPanelData) {
                 if (attributes.empty()) continue;
 
-                ry += 25.f; // заголовок
+                ry += 38.f; // высота заголовка устройства
 
                 for (auto& attr : attributes) {
-                    if (mouse.x >= 820 && mouse.x <= 1380 &&
-                        mouse.y >= ry && mouse.y <= ry + 25)
+                    if (mouse.x >= RP_X && mouse.x <= RP_X + RP_WIDTH &&
+                        mouse.y >= ry && mouse.y <= ry + ROW_H)
                     {
                         std::string fullName = deviceName + ":" + attr.name;
                         if (rightPanelSelection.count(fullName))
@@ -236,13 +267,14 @@ void SimpleWindow::handleEvents()
                         else
                             rightPanelSelection.insert(fullName);
                     }
-                    ry += 25.f;
+                    ry += ROW_H; // точно как в drawRightPanel()
                 }
-                ry += 20.f;
+                ry += 18.f; // отступ между устройствами
             }
         }
     }
 }
+
 
 
 // ================== Update ==================
@@ -270,6 +302,10 @@ void SimpleWindow::render()
     drawLeftPanel();
     drawRightPanel();
     drawCenterButtons();
+    std::string footer = "© Попов Вадим, Романюк Артём. OPC UA клиент. Москва, 2025.";
+    float footerX = (window.getSize().x / 2.f) - 300.f;
+    float footerY = window.getSize().y - 28.f;
+    drawText(footer, footerX, footerY, disabled, 18);
     window.display();
 }
 
@@ -280,13 +316,15 @@ void SimpleWindow::drawHeader()
     window.draw(serverBox);
 
     if (connected)
-        drawText("opc.tcp://127.0.0.1:4840", 30.f, 18.f);
+        drawText("● opc.tcp://127.0.0.1:4840", 30.f, 18.f, sf::Color::White, 26);
     else
-        drawText("Сервер не подключён", 30.f, 18.f, disabled);
+        drawText("✖ Сервер не подключён", 30.f, 18.f, disabled, 26);
 
-    float rx = window.getSize().x - 220.f;
-    drawText(currentTime(), rx, 10.f, sf::Color::Green, 18);
-    drawText(currentDate(), rx, 32.f, text, 14);
+    float padding = 15.f;
+    float rightX = window.getSize().x - 120.f; // ширина под время
+
+    drawText(currentTime(), rightX + 15.f, padding, sf::Color::Green, 19);
+    drawText(currentDate(), rightX + 15.f, padding + 22.f, text, 14);
 }
 
 // ================== Left Panel ==================
@@ -294,57 +332,57 @@ void SimpleWindow::drawHeader()
 void SimpleWindow::drawLeftPanel()
 {
     window.draw(leftPanel);
-    drawText("Доступные устройства", 40.f, 80.f, text, 18);
+    drawText("Доступные устройства", 40.f, 80.f, text, 30);
 
     if (!connected || !devicesInitialized) {
         drawText("Нет подключённых устройств", 40.f, 130.f, disabled);
         return;
     }
 
-    float y = 100.f;
-    const float itemHeight = 30.f;
+    float y = LEFT_PANEL_START_Y;
+    const float itemHeight = DEVICE_ITEM_HEIGHT;
     
     // Мультиметр
     bool isMultimeterExpanded = std::find(expandedDevices.begin(), expandedDevices.end(), MULTIMETER) != expandedDevices.end();
-    drawText(isMultimeterExpanded ? "▼ Мультиметр" : "▶ Мультиметр", 40.f, y, text, 16);
+    drawText(isMultimeterExpanded ? "▼ Мультиметр" : "▶ Мультиметр", 40.f, y, text, 22);
     
     if (isMultimeterExpanded) {
         float attrY = y + itemHeight;
         for (size_t i = 0; i < multimeterAttributes.size(); ++i) {
             const auto& attr = multimeterAttributes[i];
             sf::Color color = attr.isSelected ? selectedColor : text;
-            drawText("  • " + attr.displayName, 60.f, attrY, color, 14);
-            attrY += 30.f;
+            drawText("  • " + attr.displayName, 60.f, attrY, color, ATTR_FONT_SIZE);
+            attrY += ATTR_LINE_HEIGHT;
         }
     }
-    y += isMultimeterExpanded ? (multimeterAttributes.size() * 30.f + itemHeight) : itemHeight;
+    y += isMultimeterExpanded ? (multimeterAttributes.size() * ATTR_LINE_HEIGHT + itemHeight) : itemHeight;
     
     // Станок
     bool isMachineExpanded = std::find(expandedDevices.begin(), expandedDevices.end(), MACHINE) != expandedDevices.end();
-    drawText(isMachineExpanded ? "▼ Станок" : "▶ Станок", 40.f, y, text, 16);
+    drawText(isMachineExpanded ? "▼ Станок" : "▶ Станок", 40.f, y, text, 22);
     
     if (isMachineExpanded) {
         float attrY = y + itemHeight;
         for (size_t i = 0; i < machineAttributes.size(); ++i) {
             const auto& attr = machineAttributes[i];
             sf::Color color = attr.isSelected ? selectedColor : text;
-            drawText("  • " + attr.displayName, 60.f, attrY, color, 14);
-            attrY += 30.f;
+            drawText("  • " + attr.displayName, 60.f, attrY, color, ATTR_FONT_SIZE);
+            attrY += ATTR_LINE_HEIGHT;
         }
     }
-    y += isMachineExpanded ? (machineAttributes.size() * 30.f + itemHeight) : itemHeight;
+    y += isMachineExpanded ? (machineAttributes.size() * ATTR_LINE_HEIGHT + itemHeight) : itemHeight;
     
     // Компьютер
     bool isComputerExpanded = std::find(expandedDevices.begin(), expandedDevices.end(), COMPUTER) != expandedDevices.end();
-    drawText(isComputerExpanded ? "▼ Компьютер" : "▶ Компьютер", 40.f, y, text, 16);
+    drawText(isComputerExpanded ? "▼ Компьютер" : "▶ Компьютер", 40.f, y, text, 22);
     
     if (isComputerExpanded) {
         float attrY = y + itemHeight;
         for (size_t i = 0; i < computerAttributes.size(); ++i) {
             const auto& attr = computerAttributes[i];
             sf::Color color = attr.isSelected ? selectedColor : text;
-            drawText("  • " + attr.displayName, 60.f, attrY, color, 14);
-            attrY += 30.f;
+            drawText("  • " + attr.displayName, 60.f, attrY, color, ATTR_FONT_SIZE);
+            attrY += ATTR_LINE_HEIGHT;
         }
     }
 }
@@ -354,43 +392,65 @@ void SimpleWindow::drawLeftPanel()
 void SimpleWindow::drawRightPanel()
 {
     window.draw(rightPanel);
-    drawText("Мониторинг в реальном времени", 800.f, 80.f, text, 18);
+    drawText("Мониторинг параметров", RP_X + 20.f, 80.f, text, 30);
 
     if (rightPanelData.empty()) {
-        drawText("Нет выбранных атрибутов", 800.f, 140.f, disabled);
+        drawText("Нет выбранных параметров", RP_X + 40.f, 420.f, disabled, 22);
         return;
     }
 
-    float y = 140.f;
-    const float sectionSpacing = 20.f;
-    
+    float y = 130.f; // стартовая вертикальная позиция
+
     for (const auto& [deviceName, attributes] : rightPanelData) {
         if (attributes.empty()) continue;
-        
-        // Заголовок устройства
-        drawText("=========== " + deviceName + " ============", 
-                 800.f, y, accent, 16);
-        y += 25.f;
-        
-        // Атрибуты устройства
+
+        // ===== Заголовок устройства =====
+        sf::RectangleShape header({RP_WIDTH, 34.f});
+        header.setPosition(sf::Vector2f(RP_X + 10.f, y));
+        header.setFillColor(sf::Color(55, 60, 70));
+        window.draw(header);
+
+        drawText(deviceName, RP_X + 20.f, y + 6.f, sf::Color::White, 18);
+        y += 38.f;
+
+        // ===== Атрибуты устройства =====
         for (const auto& attr : attributes) {
-        std::string fullName = deviceName + ":" + attr.name;
-        bool selected = rightPanelSelection.count(fullName) > 0;
+            std::string fullName = deviceName + ":" + attr.name;
+            bool selected = rightPanelSelection.count(fullName);
 
-        drawText(
-            attr.displayName + ": " + std::to_string(attr.value),
-            820.f,
-            y,
-            selected ? selectedColor : text,
-            14
-        );
-        y += 25.f;
-    }
+            if (selected) {
+                sf::RectangleShape bg({RP_WIDTH, ROW_H});
+                bg.setPosition(sf::Vector2f(RP_X + 10.f, y));
+                bg.setFillColor(sf::Color(70, 90, 120));
+                window.draw(bg);
+            }
 
-        
-        y += sectionSpacing;
+            sf::Text t(font, clampTextUtf8(attr.displayName, 32), 15);
+t.setFillColor(selected ? sf::Color::White : text);
+t.setPosition(sf::Vector2f(RP_X + 20.f, y + 4.f));
+window.draw(t);
+
+
+
+
+
+
+            // Значение атрибута
+            drawText(
+                formatValue(attr.value),
+                RP_X + 20.f + NAME_COL_W,
+                y + 4.f,
+                selected ? sf::Color::White : accent,
+                15
+            );
+
+            y += ROW_H; // шаг вниз на одну строку
+        }
+
+        y += 18.f; // отступ между устройствами
     }
 }
+
 
 // ================== Center Buttons ==================
 
@@ -400,20 +460,20 @@ void SimpleWindow::drawCenterButtons()
     window.draw(moveLeftBtn);
     window.draw(clearAllBtn);
     
-    drawText(">> Добавить", 
+    drawText("Добавить >>", 
              moveRightBtn.getPosition().x + 10.f, 
-             moveRightBtn.getPosition().y + 10.f, 
-             sf::Color::White, 12);
+             moveRightBtn.getPosition().y + 15.f, 
+             sf::Color::White, 22);
     
     drawText("<< Удалить", 
-             moveLeftBtn.getPosition().x + 10.f, 
-             moveLeftBtn.getPosition().y + 10.f, 
-             sf::Color::White, 12);
+             moveLeftBtn.getPosition().x + 17.f, 
+             moveLeftBtn.getPosition().y + 15.f, 
+             sf::Color::White, 22);
     
     drawText("Очистить", 
-             clearAllBtn.getPosition().x + 10.f, 
-             clearAllBtn.getPosition().y + 10.f, 
-             sf::Color::White, 12);
+             clearAllBtn.getPosition().x + 33.f, 
+             clearAllBtn.getPosition().y + 15.f, 
+             sf::Color::White, 22);
 }
 
 // ================== Helpers ==================
@@ -493,50 +553,65 @@ std::string SimpleWindow::currentDate() const
 void SimpleWindow::addAttributeToRightPanel(const std::string& deviceName, const Attribute& attribute)
 {
     std::string fullName = deviceName + ":" + attribute.name;
-    
-    // Проверяем, не добавлен ли уже этот атрибут
-    if (rightPanelData.find(deviceName) != rightPanelData.end()) {
-        auto& attrs = rightPanelData[deviceName];
-        for (const auto& attr : attrs) {
-            if (attr.name == attribute.name) {
-                return; // Атрибут уже добавлен
-            }
-        }
+
+    auto& attrs = rightPanelData[deviceName];
+    for (const auto& a : attrs)
+        if (a.name == attribute.name) return; // Уже есть
+
+    RightPanelAttribute rpAttr;
+    rpAttr.name = attribute.name;
+    rpAttr.displayName = attribute.displayName;
+    rpAttr.value = attribute.value;
+
+    attrs.push_back(rpAttr);
+
+    // Синхронизируем с левой панелью
+    std::vector<Attribute>* leftAttrs = nullptr;
+    if (deviceName == "Мультиметр") leftAttrs = &multimeterAttributes;
+    else if (deviceName == "Станок") leftAttrs = &machineAttributes;
+    else if (deviceName == "Компьютер") leftAttrs = &computerAttributes;
+
+    if (leftAttrs) {
+        for (auto& a : *leftAttrs)
+            if (a.name == attribute.name)
+                a.isSelected = true;
     }
-    
-    // Добавляем атрибут
-    rightPanelData[deviceName].push_back(attribute);
-    selectedAttributes.push_back(fullName);
 }
 
 void SimpleWindow::removeAttributeFromRightPanel(const std::string& fullName)
 {
-    // Парсим имя устройства и атрибута
     size_t colonPos = fullName.find(':');
     if (colonPos == std::string::npos) return;
     
     std::string deviceName = fullName.substr(0, colonPos);
     std::string attrName = fullName.substr(colonPos + 1);
-    
-    // Удаляем атрибут из правой панели
+
     if (rightPanelData.find(deviceName) != rightPanelData.end()) {
         auto& attributes = rightPanelData[deviceName];
-        // Используем ручное удаление вместо std::remove_if
         auto it = attributes.begin();
         while (it != attributes.end()) {
-            if (it->name == attrName) {
+            if (it->name == attrName)
                 it = attributes.erase(it);
-            } else {
+            else
                 ++it;
-            }
         }
-        
-        // Если у устройства не осталось атрибутов, удаляем его из правой панели
-        if (attributes.empty()) {
+        if (attributes.empty())
             rightPanelData.erase(deviceName);
-        }
+    }
+
+    // Сброс выбора в левой панели
+    std::vector<Attribute>* leftAttrs = nullptr;
+    if (deviceName == "Мультиметр") leftAttrs = &multimeterAttributes;
+    else if (deviceName == "Станок") leftAttrs = &machineAttributes;
+    else if (deviceName == "Компьютер") leftAttrs = &computerAttributes;
+
+    if (leftAttrs) {
+        for (auto& a : *leftAttrs)
+            if (a.name == attrName)
+                a.isSelected = false;
     }
 }
+
 
 void SimpleWindow::updateAttributeValues()
 {
