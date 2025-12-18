@@ -1,6 +1,12 @@
 #include "async_manager.h"
 #include <iostream>
 
+DeviceData AsyncDataManager::getCurrentData()
+{
+    std::lock_guard<std::mutex> lock(dataMutex);
+    return currentData; // ← ВАЖНО: копия!
+}
+
 AsyncDataManager::AsyncDataManager(OPCUAClient* client, 
                                   MultimeterDevice* multimeter,
                                   MachineDevice* machine,
@@ -77,7 +83,7 @@ void AsyncDataManager::workerFunction() {
         
         auto startTime = std::chrono::high_resolution_clock::now();
         
-        DeviceData newData;
+        DeviceData newData{};
         newData.lastUpdate = std::chrono::system_clock::now();
         bool hasValidData = false;
         
@@ -201,9 +207,4 @@ void AsyncDataManager::workerFunction() {
             std::this_thread::sleep_for(std::chrono::milliseconds(1)); // Минимальная задержка
         }
     }
-}
-
-DeviceData AsyncDataManager::getCurrentData() {
-    std::lock_guard<std::mutex> lock(dataMutex);
-    return currentData;
 }

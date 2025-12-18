@@ -10,39 +10,41 @@
 #include <condition_variable>
 #include <chrono>
 
-struct DeviceData {
+struct DeviceData
+{
     struct MultimeterData {
-        double voltage = 0.0;
-        double current = 0.0;
-        double resistance = 0.0;
-        double power = 0.0;
-        bool valid = false;
+        bool valid{false};
+        double voltage{};
+        double current{};
+        double resistance{};
+        double power{};
         std::chrono::system_clock::time_point timestamp;
     } multimeter;
 
     struct MachineData {
-        double rpm = 0.0;
-        double power = 0.0;
-        double voltage = 0.0;
-        double energy = 0.0;
-        bool valid = false;
+        bool valid{false};
+        double rpm{};
+        double power{};
+        double voltage{};
+        double energy{};
         std::chrono::system_clock::time_point timestamp;
     } machine;
 
     struct ComputerData {
-        double fan1 = 0.0;
-        double fan2 = 0.0;
-        double fan3 = 0.0;
-        double cpuLoad = 0.0;
-        double gpuLoad = 0.0;
-        double ramUsage = 0.0;
-        bool valid = false;
+        bool valid{false};
+        double fan1{};
+        double fan2{};
+        double fan3{};
+        double cpuLoad{};
+        double gpuLoad{};
+        double ramUsage{};
         std::chrono::system_clock::time_point timestamp;
     } computer;
 
+    bool allValid{false};
     std::chrono::system_clock::time_point lastUpdate;
-    bool allValid = false;
 };
+
 
 class AsyncDataManager {
 private:
