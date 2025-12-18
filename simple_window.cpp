@@ -426,14 +426,9 @@ void SimpleWindow::drawRightPanel()
             }
 
             sf::Text t(font, clampTextUtf8(attr.displayName, 32), 15);
-t.setFillColor(selected ? sf::Color::White : text);
-t.setPosition(sf::Vector2f(RP_X + 20.f, y + 4.f));
-window.draw(t);
-
-
-
-
-
+            t.setFillColor(selected ? sf::Color::White : text);
+            t.setPosition(sf::Vector2f(RP_X + 20.f, y + 4.f));
+            window.draw(t);
 
             // Значение атрибута
             drawText(
