@@ -6,6 +6,9 @@
 #include <string>
 #include <memory>
 #include <chrono>
+#include <vector>
+#include <map>
+#include <algorithm>  // Добавьте эту строку
 
 #include "opcua_client.h"
 #include "device_managers.h"
@@ -20,6 +23,31 @@ public:
     void run();
 
 private:
+    // Структура для хранения атрибута
+    struct Attribute {
+        std::string name;
+        std::string displayName;
+        double value;
+        bool isSelected;
+        
+        // Конструктор для удобства
+        Attribute(const std::string& n, const std::string& dn, double v, bool sel = false)
+            : name(n), displayName(dn), value(v), isSelected(sel) {}
+    };
+
+    // Структура для устройства в правой панели
+    struct RightPanelDevice {
+        std::string name;
+        std::vector<Attribute> attributes;
+    };
+
+    // Тип для перечисления устройств
+    enum DeviceType { 
+        NONE = 0, 
+        MULTIMETER = 1, 
+        MACHINE = 2, 
+        COMPUTER = 3 
+    };
 
     void updateMultimeterData(const DeviceData::MultimeterData& data);
     void updateMachineData(const DeviceData::MachineData& data);
@@ -43,8 +71,17 @@ private:
     bool devicesInitialized{false};
 
     // ===== UI state =====
-    enum DeviceType { NONE, MULTIMETER, MACHINE, COMPUTER };
     DeviceType selectedDevice{NONE};
+    std::vector<DeviceType> expandedDevices;  // Развернутые устройства в левой панели
+    std::vector<std::string> selectedAttributes;  // Выбранные атрибуты (в формате "Устройство:Атрибут")
+    
+    // Данные атрибутов для отображения
+    std::vector<Attribute> multimeterAttributes;
+    std::vector<Attribute> machineAttributes;
+    std::vector<Attribute> computerAttributes;
+    
+    // Данные для правой панели (сгруппированные по устройствам)
+    std::map<std::string, std::vector<Attribute>> rightPanelData;
 
     // ===== Time =====
     std::chrono::steady_clock::time_point lastUpdate;
@@ -54,16 +91,17 @@ private:
     sf::Color panel{40, 40, 55};
     sf::Color text{220, 220, 220};
     sf::Color accent{70, 130, 180};
+    sf::Color selectedColor{100, 180, 100};
     sf::Color disabled{120, 120, 120};
 
     // ===== UI Elements =====
     sf::RectangleShape serverBox;
-    sf::RectangleShape devicePanel;
-    sf::RectangleShape attrPanel;
-
-    sf::RectangleShape multimeterBtn;
-    sf::RectangleShape machineBtn;
-    sf::RectangleShape computerBtn;
+    sf::RectangleShape leftPanel;
+    sf::RectangleShape rightPanel;
+    
+    sf::RectangleShape moveRightBtn;
+    sf::RectangleShape moveLeftBtn;
+    sf::RectangleShape clearAllBtn;
 
     // ===== Data =====
     struct {
@@ -87,8 +125,9 @@ private:
 
     // ===== Drawing =====
     void drawHeader();
-    void drawDevicePanel();
-    void drawAttributesPanel();
+    void drawLeftPanel();
+    void drawRightPanel();
+    void drawCenterButtons();
 
     void drawText(const std::string& str, float x, float y,
                   sf::Color color = sf::Color::White, unsigned size = 16);
@@ -97,11 +136,25 @@ private:
                     const std::string& label,
                     bool selected);
 
+    bool isMouseOver(float x, float y, float width, float height);
     bool isMouseOver(const sf::RectangleShape& r);
 
     // ===== Helpers =====
     std::string currentTime() const;
     std::string currentDate() const;
+    
+    // Инициализация списков атрибутов
+    void initializeAttributes();
+    
+    // Обработка кликов на атрибуты
+    void handleAttributeClick(const std::string& deviceName, int attributeIndex);
+    
+    // Добавление/удаление атрибута в правую панель
+    void addAttributeToRightPanel(const std::string& deviceName, const Attribute& attribute);
+    void removeAttributeFromRightPanel(const std::string& fullName);
+    
+    // Обновление значений атрибутов
+    void updateAttributeValues();
 
     // ===== OPC =====
     void connectToServer();

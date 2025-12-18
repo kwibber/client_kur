@@ -4,8 +4,12 @@
 #include <iomanip>
 #include <sstream>
 #include <ctime>
+#include <set>
 #include <iostream>
+#include <algorithm>  // Добавьте эту строку
 #include "async_manager.h"
+
+static std::set<std::string> rightPanelSelection;
 
 // ================== Constructor ==================
 
@@ -15,27 +19,31 @@ SimpleWindow::SimpleWindow()
 {
     window.setVerticalSyncEnabled(true);
 
-    // UI layout
     serverBox.setSize({420.f, 36.f});
     serverBox.setPosition({20.f, 10.f});
     serverBox.setFillColor(panel);
 
-    devicePanel.setSize({240.f, 600.f});
-    devicePanel.setPosition({20.f, 60.f});
-    devicePanel.setFillColor(panel);
+    leftPanel.setSize({320.f, 600.f});
+    leftPanel.setPosition({20.f, 60.f});
+    leftPanel.setFillColor(panel);
 
-    attrPanel.setSize({880.f, 600.f});
-    attrPanel.setPosition({300.f, 60.f});
-    attrPanel.setFillColor(panel);
+    rightPanel.setSize({520.f, 600.f});
+    rightPanel.setPosition({780.f, 60.f});
+    rightPanel.setFillColor(panel);
 
-    multimeterBtn.setSize({200.f, 40.f});
-    multimeterBtn.setPosition({40.f, 120.f});
+    moveRightBtn.setSize({80.f, 40.f});
+    moveRightBtn.setPosition({550.f, 300.f});
+    moveRightBtn.setFillColor(accent);
 
-    machineBtn = multimeterBtn;
-    machineBtn.setPosition({40.f, 170.f});
+    moveLeftBtn.setSize({80.f, 40.f});
+    moveLeftBtn.setPosition({550.f, 360.f});
+    moveLeftBtn.setFillColor(accent);
 
-    computerBtn = multimeterBtn;
-    computerBtn.setPosition({40.f, 220.f});
+    clearAllBtn.setSize({80.f, 40.f});
+    clearAllBtn.setPosition({550.f, 420.f});
+    clearAllBtn.setFillColor(sf::Color(180, 70, 70));
+
+    initializeAttributes();
 }
 
 SimpleWindow::~SimpleWindow() {
@@ -51,12 +59,39 @@ bool SimpleWindow::initialize()
     return fontLoaded;
 }
 
+// ================== Инициализация атрибутов ==================
+
+void SimpleWindow::initializeAttributes()
+{
+    // Атрибуты мультиметра
+    multimeterAttributes.clear();
+    multimeterAttributes.push_back(Attribute("voltage", "Напряжение", 0.0, false));
+    multimeterAttributes.push_back(Attribute("current", "Ток", 0.0, false));
+    multimeterAttributes.push_back(Attribute("resistance", "Сопротивление", 0.0, false));
+    multimeterAttributes.push_back(Attribute("power", "Мощность", 0.0, false));
+    
+    // Атрибуты станка
+    machineAttributes.clear();
+    machineAttributes.push_back(Attribute("rpm", "Обороты", 0.0, false));
+    machineAttributes.push_back(Attribute("power", "Мощность", 0.0, false));
+    machineAttributes.push_back(Attribute("voltage", "Напряжение", 0.0, false));
+    machineAttributes.push_back(Attribute("energy", "Энергопотребление", 0.0, false));
+    
+    // Атрибуты компьютера
+    computerAttributes.clear();
+    computerAttributes.push_back(Attribute("fan1", "Вентилятор 1", 0.0, false));
+    computerAttributes.push_back(Attribute("fan2", "Вентилятор 2", 0.0, false));
+    computerAttributes.push_back(Attribute("fan3", "Вентилятор 3", 0.0, false));
+    computerAttributes.push_back(Attribute("cpuLoad", "Загрузка CPU", 0.0, false));
+    computerAttributes.push_back(Attribute("gpuLoad", "Загрузка GPU", 0.0, false));
+    computerAttributes.push_back(Attribute("ramUsage", "Использование RAM", 0.0, false));
+}
+
 // ================== Run ==================
 
 void SimpleWindow::run()
 {
     lastUpdate = std::chrono::steady_clock::now();
-
     while (window.isOpen() && running) {
         handleEvents();
         update();
@@ -69,28 +104,152 @@ void SimpleWindow::run()
 void SimpleWindow::handleEvents()
 {
     while (auto e = window.pollEvent()) {
-        if (e->is<sf::Event::Closed>())
+        if (e->is<sf::Event::Closed>()) {
             window.close();
+        }
 
         if (auto* m = e->getIf<sf::Event::MouseButtonPressed>()) {
-            if (m->button == sf::Mouse::Button::Left) {
-                if (!connected && isMouseOver(serverBox))
-                    connectToServer();
+            if (m->button != sf::Mouse::Button::Left)
+                continue;
 
-                if (isMouseOver(multimeterBtn)) selectedDevice = MULTIMETER;
-                if (isMouseOver(machineBtn))    selectedDevice = MACHINE;
-                if (isMouseOver(computerBtn))  selectedDevice = COMPUTER;
+            auto mouse = sf::Mouse::getPosition(window);
+
+            // ===== Подключение к серверу =====
+            if (!connected && isMouseOver(serverBox)) {
+                connectToServer();
+                return;
+            }
+
+            // ===== Добавить выбранные атрибуты =====
+            if (isMouseOver(moveRightBtn)) {
+                for (const auto& a : multimeterAttributes)
+                    if (a.isSelected) addAttributeToRightPanel("Мультиметр", a);
+                for (const auto& a : machineAttributes)
+                    if (a.isSelected) addAttributeToRightPanel("Станок", a);
+                for (const auto& a : computerAttributes)
+                    if (a.isSelected) addAttributeToRightPanel("Компьютер", a);
+                return;
+            }
+
+            // ===== Удалить выбранные в правой панели =====
+            if (isMouseOver(moveLeftBtn)) {
+                for (const auto& fullName : rightPanelSelection) {
+                    removeAttributeFromRightPanel(fullName);
+                }
+                rightPanelSelection.clear();
+                return;
+            }
+
+            // ===== Очистить всё =====
+            if (isMouseOver(clearAllBtn)) {
+                rightPanelData.clear();
+                rightPanelSelection.clear();
+                for (auto& a : multimeterAttributes) a.isSelected = false;
+                for (auto& a : machineAttributes) a.isSelected = false;
+                for (auto& a : computerAttributes) a.isSelected = false;
+                return;
+            }
+
+            if (!connected || !devicesInitialized)
+                continue;
+
+            // ===== Левая панель (устройства + атрибуты) =====
+            float y = 100.f;
+            const float itemH = 30.f;
+
+            auto toggleDevice = [&](DeviceType d) {
+                auto it = std::find(expandedDevices.begin(), expandedDevices.end(), d);
+                if (it != expandedDevices.end())
+                    expandedDevices.erase(it);
+                else
+                    expandedDevices.push_back(d);
+            };
+
+            auto deviceHit = [&](float yy) {
+                return mouse.x >= 40 && mouse.x <= 380 &&
+                       mouse.y >= yy && mouse.y <= yy + itemH;
+            };
+
+            // --- Мультиметр ---
+            if (deviceHit(y)) toggleDevice(MULTIMETER);
+            bool mExp = std::find(expandedDevices.begin(), expandedDevices.end(), MULTIMETER) != expandedDevices.end();
+            y += itemH;
+
+            if (mExp) {
+                for (auto& a : multimeterAttributes) {
+                    if (mouse.x >= 60 && mouse.x <= 360 &&
+                        mouse.y >= y && mouse.y <= y + 25)
+                    {
+                        a.isSelected = !a.isSelected;
+                    }
+                    y += 30.f;
+                }
+            }
+
+            // --- Станок ---
+            if (deviceHit(y)) toggleDevice(MACHINE);
+            bool maExp = std::find(expandedDevices.begin(), expandedDevices.end(), MACHINE) != expandedDevices.end();
+            y += itemH;
+
+            if (maExp) {
+                for (auto& a : machineAttributes) {
+                    if (mouse.x >= 60 && mouse.x <= 360 &&
+                        mouse.y >= y && mouse.y <= y + 25)
+                    {
+                        a.isSelected = !a.isSelected;
+                    }
+                    y += 30.f;
+                }
+            }
+
+            // --- Компьютер ---
+            if (deviceHit(y)) toggleDevice(COMPUTER);
+            bool cExp = std::find(expandedDevices.begin(), expandedDevices.end(), COMPUTER) != expandedDevices.end();
+            y += itemH;
+
+            if (cExp) {
+                for (auto& a : computerAttributes) {
+                    if (mouse.x >= 60 && mouse.x <= 360 &&
+                        mouse.y >= y && mouse.y <= y + 25)
+                    {
+                        a.isSelected = !a.isSelected;
+                    }
+                    y += 30.f;
+                }
+            }
+
+            // ===== Правая панель (выбор атрибутов) =====
+            float ry = 140.f;
+
+            for (auto& [deviceName, attributes] : rightPanelData) {
+                if (attributes.empty()) continue;
+
+                ry += 25.f; // заголовок
+
+                for (auto& attr : attributes) {
+                    if (mouse.x >= 820 && mouse.x <= 1380 &&
+                        mouse.y >= ry && mouse.y <= ry + 25)
+                    {
+                        std::string fullName = deviceName + ":" + attr.name;
+                        if (rightPanelSelection.count(fullName))
+                            rightPanelSelection.erase(fullName);
+                        else
+                            rightPanelSelection.insert(fullName);
+                    }
+                    ry += 25.f;
+                }
+                ry += 20.f;
             }
         }
     }
 }
 
+
 // ================== Update ==================
 
 void SimpleWindow::update()
 {
-    if (!connected || !asyncManager)
-        return;
+    if (!connected || !asyncManager) return;
 
     static auto last = std::chrono::steady_clock::now();
     auto now = std::chrono::steady_clock::now();
@@ -99,18 +258,18 @@ void SimpleWindow::update()
         return;
 
     last = now;
-
-    updateAttributes();  // ← единственная точка обновления данных
+    updateAttributes();
+    updateAttributeValues();
 }
-
 // ================== Render ==================
 
 void SimpleWindow::render()
 {
     window.clear(background);
     drawHeader();
-    drawDevicePanel();
-    drawAttributesPanel();
+    drawLeftPanel();
+    drawRightPanel();
+    drawCenterButtons();
     window.display();
 }
 
@@ -130,121 +289,132 @@ void SimpleWindow::drawHeader()
     drawText(currentDate(), rx, 32.f, text, 14);
 }
 
-// ================== Device panel ==================
+// ================== Left Panel ==================
 
-void SimpleWindow::drawDevicePanel()
+void SimpleWindow::drawLeftPanel()
 {
-    window.draw(devicePanel);
-    drawText("Устройства", 40.f, 80.f, text, 18);
+    window.draw(leftPanel);
+    drawText("Доступные устройства", 40.f, 80.f, text, 18);
 
-    // ⛔ Нет подключения — нет устройств
     if (!connected || !devicesInitialized) {
-        drawText("Нет подключённых устройств",
-                 40.f, 130.f,
-                 disabled);
+        drawText("Нет подключённых устройств", 40.f, 130.f, disabled);
         return;
     }
 
-    // ✅ Сервер подключён — показываем устройства
-    drawButton(multimeterBtn,
-               "Мультиметр",
-               selectedDevice == MULTIMETER);
-
-    drawButton(machineBtn,
-               "Станок",
-               selectedDevice == MACHINE);
-
-    drawButton(computerBtn,
-               "Компьютер",
-               selectedDevice == COMPUTER);
+    float y = 100.f;
+    const float itemHeight = 30.f;
+    
+    // Мультиметр
+    bool isMultimeterExpanded = std::find(expandedDevices.begin(), expandedDevices.end(), MULTIMETER) != expandedDevices.end();
+    drawText(isMultimeterExpanded ? "▼ Мультиметр" : "▶ Мультиметр", 40.f, y, text, 16);
+    
+    if (isMultimeterExpanded) {
+        float attrY = y + itemHeight;
+        for (size_t i = 0; i < multimeterAttributes.size(); ++i) {
+            const auto& attr = multimeterAttributes[i];
+            sf::Color color = attr.isSelected ? selectedColor : text;
+            drawText("  • " + attr.displayName, 60.f, attrY, color, 14);
+            attrY += 30.f;
+        }
+    }
+    y += isMultimeterExpanded ? (multimeterAttributes.size() * 30.f + itemHeight) : itemHeight;
+    
+    // Станок
+    bool isMachineExpanded = std::find(expandedDevices.begin(), expandedDevices.end(), MACHINE) != expandedDevices.end();
+    drawText(isMachineExpanded ? "▼ Станок" : "▶ Станок", 40.f, y, text, 16);
+    
+    if (isMachineExpanded) {
+        float attrY = y + itemHeight;
+        for (size_t i = 0; i < machineAttributes.size(); ++i) {
+            const auto& attr = machineAttributes[i];
+            sf::Color color = attr.isSelected ? selectedColor : text;
+            drawText("  • " + attr.displayName, 60.f, attrY, color, 14);
+            attrY += 30.f;
+        }
+    }
+    y += isMachineExpanded ? (machineAttributes.size() * 30.f + itemHeight) : itemHeight;
+    
+    // Компьютер
+    bool isComputerExpanded = std::find(expandedDevices.begin(), expandedDevices.end(), COMPUTER) != expandedDevices.end();
+    drawText(isComputerExpanded ? "▼ Компьютер" : "▶ Компьютер", 40.f, y, text, 16);
+    
+    if (isComputerExpanded) {
+        float attrY = y + itemHeight;
+        for (size_t i = 0; i < computerAttributes.size(); ++i) {
+            const auto& attr = computerAttributes[i];
+            sf::Color color = attr.isSelected ? selectedColor : text;
+            drawText("  • " + attr.displayName, 60.f, attrY, color, 14);
+            attrY += 30.f;
+        }
+    }
 }
 
-// ================== Attributes ==================
+// ================== Right Panel ==================
 
-void SimpleWindow::drawAttributesPanel()
+void SimpleWindow::drawRightPanel()
 {
-    window.draw(attrPanel);
-    drawText("Атрибуты устройства", 320.f, 80.f, text, 18);
+    window.draw(rightPanel);
+    drawText("Мониторинг в реальном времени", 800.f, 80.f, text, 18);
 
-    // Нет подключения или не выбрано устройство
-    if (!connected || !devicesInitialized || selectedDevice == NONE) {
-        drawText("Выберите устройство для просмотра атрибутов",
-                 340.f, 140.f,
-                 disabled);
+    if (rightPanelData.empty()) {
+        drawText("Нет выбранных атрибутов", 800.f, 140.f, disabled);
         return;
     }
 
     float y = 140.f;
-    const float dy = 30.f;
+    const float sectionSpacing = 20.f;
+    
+    for (const auto& [deviceName, attributes] : rightPanelData) {
+        if (attributes.empty()) continue;
+        
+        // Заголовок устройства
+        drawText("=========== " + deviceName + " ============", 
+                 800.f, y, accent, 16);
+        y += 25.f;
+        
+        // Атрибуты устройства
+        for (const auto& attr : attributes) {
+        std::string fullName = deviceName + ":" + attr.name;
+        bool selected = rightPanelSelection.count(fullName) > 0;
 
-    // Лямбда для аккуратной строки "название — значение"
-    auto row = [&](const std::string& name, const std::string& value) {
-        drawText(name, 320.f, y, text);
-        drawText(value, 540.f, y, accent);
-        y += dy;
-    };
-
-    // ===== МУЛЬТИМЕТР =====
-    if (selectedDevice == MULTIMETER) {
-        drawText("Мультиметр", 320.f, y, accent, 16);
-        y += dy;
-
-        row("Напряжение:",
-            std::to_string(multimeterData.voltage) + " В");
-
-        row("Сила тока:",
-            std::to_string(multimeterData.current) + " А");
-
-        row("Сопротивление:",
-            std::to_string(multimeterData.resistance) + " Ом");
-
-        row("Мощность:",
-            std::to_string(multimeterData.power) + " Вт");
+        drawText(
+            attr.displayName + ": " + std::to_string(attr.value),
+            820.f,
+            y,
+            selected ? selectedColor : text,
+            14
+        );
+        y += 25.f;
     }
 
-    // ===== СТАНОК =====
-    if (selectedDevice == MACHINE) {
-        drawText("Станок", 320.f, y, accent, 16);
-        y += dy;
-
-        row("Обороты:",
-            std::to_string(machineData.rpm) + " об/мин");
-
-        row("Мощность:",
-            std::to_string(machineData.power) + " кВт");
-
-        row("Напряжение:",
-            std::to_string(machineData.voltage) + " В");
-
-        row("Энергопотребление:",
-            std::to_string(machineData.energy) + " кВт·ч");
-    }
-
-    // ===== КОМПЬЮТЕР =====
-    if (selectedDevice == COMPUTER) {
-        drawText("Компьютер", 320.f, y, accent, 16);
-        y += dy;
-
-        row("Вентилятор 1:",
-            std::to_string(computerData.fan1) + " об/мин");
-
-        row("Вентилятор 2:",
-            std::to_string(computerData.fan2) + " об/мин");
-
-        row("Вентилятор 3:",
-            std::to_string(computerData.fan3) + " об/мин");
-
-        row("Загрузка CPU:",
-            std::to_string(computerData.cpuLoad) + " %");
-
-        row("Загрузка GPU:",
-            std::to_string(computerData.gpuLoad) + " %");
-
-        row("Использование RAM:",
-            std::to_string(computerData.ramUsage) + " %");
+        
+        y += sectionSpacing;
     }
 }
 
+// ================== Center Buttons ==================
+
+void SimpleWindow::drawCenterButtons()
+{
+    window.draw(moveRightBtn);
+    window.draw(moveLeftBtn);
+    window.draw(clearAllBtn);
+    
+    drawText(">> Добавить", 
+             moveRightBtn.getPosition().x + 10.f, 
+             moveRightBtn.getPosition().y + 10.f, 
+             sf::Color::White, 12);
+    
+    drawText("<< Удалить", 
+             moveLeftBtn.getPosition().x + 10.f, 
+             moveLeftBtn.getPosition().y + 10.f, 
+             sf::Color::White, 12);
+    
+    drawText("Очистить", 
+             clearAllBtn.getPosition().x + 10.f, 
+             clearAllBtn.getPosition().y + 10.f, 
+             sf::Color::White, 12);
+}
 
 // ================== Helpers ==================
 
@@ -270,6 +440,13 @@ void SimpleWindow::drawButton(sf::RectangleShape& btn,
     btn.setFillColor(selected ? accent : panel);
     window.draw(btn);
     drawText(label, btn.getPosition().x + 10, btn.getPosition().y + 10);
+}
+
+bool SimpleWindow::isMouseOver(float x, float y, float width, float height)
+{
+    auto m = sf::Mouse::getPosition(window);
+    return m.x >= x && m.x <= x + width &&
+           m.y >= y && m.y <= y + height;
 }
 
 bool SimpleWindow::isMouseOver(const sf::RectangleShape& r)
@@ -311,11 +488,113 @@ std::string SimpleWindow::currentDate() const
     return ss.str();
 }
 
+// ================== Обработка атрибутов ==================
+
+void SimpleWindow::addAttributeToRightPanel(const std::string& deviceName, const Attribute& attribute)
+{
+    std::string fullName = deviceName + ":" + attribute.name;
+    
+    // Проверяем, не добавлен ли уже этот атрибут
+    if (rightPanelData.find(deviceName) != rightPanelData.end()) {
+        auto& attrs = rightPanelData[deviceName];
+        for (const auto& attr : attrs) {
+            if (attr.name == attribute.name) {
+                return; // Атрибут уже добавлен
+            }
+        }
+    }
+    
+    // Добавляем атрибут
+    rightPanelData[deviceName].push_back(attribute);
+    selectedAttributes.push_back(fullName);
+}
+
+void SimpleWindow::removeAttributeFromRightPanel(const std::string& fullName)
+{
+    // Парсим имя устройства и атрибута
+    size_t colonPos = fullName.find(':');
+    if (colonPos == std::string::npos) return;
+    
+    std::string deviceName = fullName.substr(0, colonPos);
+    std::string attrName = fullName.substr(colonPos + 1);
+    
+    // Удаляем атрибут из правой панели
+    if (rightPanelData.find(deviceName) != rightPanelData.end()) {
+        auto& attributes = rightPanelData[deviceName];
+        // Используем ручное удаление вместо std::remove_if
+        auto it = attributes.begin();
+        while (it != attributes.end()) {
+            if (it->name == attrName) {
+                it = attributes.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        
+        // Если у устройства не осталось атрибутов, удаляем его из правой панели
+        if (attributes.empty()) {
+            rightPanelData.erase(deviceName);
+        }
+    }
+}
+
+void SimpleWindow::updateAttributeValues()
+{
+    // Обновляем значения в структурах атрибутов
+    for (auto& attr : multimeterAttributes) {
+        if (attr.name == "voltage") attr.value = multimeterData.voltage;
+        else if (attr.name == "current") attr.value = multimeterData.current;
+        else if (attr.name == "resistance") attr.value = multimeterData.resistance;
+        else if (attr.name == "power") attr.value = multimeterData.power;
+    }
+    
+    for (auto& attr : machineAttributes) {
+        if (attr.name == "rpm") attr.value = machineData.rpm;
+        else if (attr.name == "power") attr.value = machineData.power;
+        else if (attr.name == "voltage") attr.value = machineData.voltage;
+        else if (attr.name == "energy") attr.value = machineData.energy;
+    }
+    
+    for (auto& attr : computerAttributes) {
+        if (attr.name == "fan1") attr.value = computerData.fan1;
+        else if (attr.name == "fan2") attr.value = computerData.fan2;
+        else if (attr.name == "fan3") attr.value = computerData.fan3;
+        else if (attr.name == "cpuLoad") attr.value = computerData.cpuLoad;
+        else if (attr.name == "gpuLoad") attr.value = computerData.gpuLoad;
+        else if (attr.name == "ramUsage") attr.value = computerData.ramUsage;
+    }
+    
+    // Обновляем значения в правой панели
+    for (auto& [deviceName, attributes] : rightPanelData) {
+        for (auto& attr : attributes) {
+            if (deviceName == "Мультиметр") {
+                if (attr.name == "voltage") attr.value = multimeterData.voltage;
+                else if (attr.name == "current") attr.value = multimeterData.current;
+                else if (attr.name == "resistance") attr.value = multimeterData.resistance;
+                else if (attr.name == "power") attr.value = multimeterData.power;
+            }
+            else if (deviceName == "Станок") {
+                if (attr.name == "rpm") attr.value = machineData.rpm;
+                else if (attr.name == "power") attr.value = machineData.power;
+                else if (attr.name == "voltage") attr.value = machineData.voltage;
+                else if (attr.name == "energy") attr.value = machineData.energy;
+            }
+            else if (deviceName == "Компьютер") {
+                if (attr.name == "fan1") attr.value = computerData.fan1;
+                else if (attr.name == "fan2") attr.value = computerData.fan2;
+                else if (attr.name == "fan3") attr.value = computerData.fan3;
+                else if (attr.name == "cpuLoad") attr.value = computerData.cpuLoad;
+                else if (attr.name == "gpuLoad") attr.value = computerData.gpuLoad;
+                else if (attr.name == "ramUsage") attr.value = computerData.ramUsage;
+            }
+        }
+    }
+}
+
 // ================== OPC ==================
 
 void SimpleWindow::connectToServer()
 {
-    // Защита от повторного запуска
     if (connected) return;
 
     std::thread([this]() {
@@ -326,22 +605,16 @@ void SimpleWindow::connectToServer()
             return;
         }
 
-        // ⬇⬇⬇ ВАЖНО: возвращаемся в главный поток ЛОГИЧЕСКИ
-        // (физически мы всё ещё в потоке, но UI-трогаем аккуратно)
-
         client = newClient;
         connected = true;
 
-        // 🔹 Инициализация устройств
         initializeDevices();
 
-        // 🔹 Проверка: устройства реально созданы
         if (!multimeter || !machine || !computer) {
             std::cerr << "Устройства не инициализированы" << std::endl;
             return;
         }
 
-        // 🔹 Запуск асинхронного чтения
         asyncManager = std::make_shared<AsyncDataManager>(
             client.get(),
             multimeter.get(),
@@ -355,13 +628,11 @@ void SimpleWindow::connectToServer()
     }).detach();
 }
 
-
 void SimpleWindow::initializeDevices()
 {
     if (!client || !client->isConnected())
         return;
 
-    // 📌 Корневой узел Objects (ns=0;i=85)
     OPCUANode objectsNode(
         UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER),
         "Objects",
@@ -379,10 +650,7 @@ void SimpleWindow::initializeDevices()
     devicesInitialized = m || ma || c;
 }
 
-
-
 void SimpleWindow::updateAttributes() {
-    // Если не подключены — сбрасываем всё и выходим
     if (!connected || !asyncManager) {
         multimeterData = {};
         machineData = {};
@@ -390,24 +658,20 @@ void SimpleWindow::updateAttributes() {
         return;
     }
 
-    // Забираем актуальные данные из асинхронного менеджера
     DeviceData data = asyncManager->getCurrentData();
 
-    // ===== МУЛЬТИМЕТР =====
     if (data.multimeter.valid) {
         updateMultimeterData(data.multimeter);
     } else {
-        multimeterData = {}; // сброс, если данные невалидны
+        multimeterData = {};
     }
 
-    // ===== СТАНОК =====
     if (data.machine.valid) {
         updateMachineData(data.machine);
     } else {
         machineData = {};
     }
 
-    // ===== КОМПЬЮТЕР =====
     if (data.computer.valid) {
         updateComputerData(data.computer);
     } else {
@@ -415,22 +679,20 @@ void SimpleWindow::updateAttributes() {
     }
 }
 
-void updateMultimeterData(const DeviceData::MultimeterData&);
-void updateMachineData(const DeviceData::MachineData&);
-void updateComputerData(const DeviceData::ComputerData&);
-
 void SimpleWindow::updateMultimeterData(const DeviceData::MultimeterData& data) {
     multimeterData.voltage    = data.voltage;
     multimeterData.current    = data.current;
     multimeterData.resistance = data.resistance;
     multimeterData.power      = data.power;
 }
+
 void SimpleWindow::updateMachineData(const DeviceData::MachineData& data) {
     machineData.rpm     = data.rpm;
     machineData.power   = data.power;
     machineData.voltage = data.voltage;
     machineData.energy  = data.energy;
 }
+
 void SimpleWindow::updateComputerData(const DeviceData::ComputerData& data) {
     computerData.fan1     = data.fan1;
     computerData.fan2     = data.fan2;
@@ -439,4 +701,3 @@ void SimpleWindow::updateComputerData(const DeviceData::ComputerData& data) {
     computerData.gpuLoad  = data.gpuLoad;
     computerData.ramUsage = data.ramUsage;
 }
-
