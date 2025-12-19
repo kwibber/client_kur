@@ -4,7 +4,7 @@
 DeviceData AsyncDataManager::getCurrentData()
 {
     std::lock_guard<std::mutex> lock(dataMutex);
-    return currentData; // ← ВАЖНО: копия!
+    return currentData;
 }
 
 AsyncDataManager::AsyncDataManager(OPCUAClient* client, 
@@ -30,13 +30,10 @@ void AsyncDataManager::start() {
     running = true;
     workerThread = std::thread(&AsyncDataManager::workerFunction, this);
     
-    // Устанавливаем приоритет потока (для MinGW/MINGW)
 #ifdef __MINGW32__
-    // Для MinGW используем Windows API
     auto handle = workerThread.native_handle();
     SetThreadPriority(reinterpret_cast<HANDLE>(handle), THREAD_PRIORITY_ABOVE_NORMAL);
 #elif defined(_WIN32)
-    // Для MSVC
     auto handle = workerThread.native_handle();
     SetThreadPriority(handle, THREAD_PRIORITY_ABOVE_NORMAL);
 #endif
@@ -60,11 +57,9 @@ void AsyncDataManager::workerFunction() {
     const int maxReadErrors = 5;
     
     while (running) {
-        // Проверяем соединение перед чтением данных
         if (!client || !client->isConnected()) {
             connectionErrors++;
             if (connectionErrors >= maxConnectionErrors) {
-                // Помечаем данные как невалидные
                 {
                     std::lock_guard<std::mutex> lock(dataMutex);
                     currentData.multimeter.valid = false;
@@ -73,12 +68,11 @@ void AsyncDataManager::workerFunction() {
                     currentData.allValid = false;
                 }
                 
-                // Ждем и пытаемся продолжить
                 std::this_thread::sleep_for(std::chrono::milliseconds(updateIntervalMs));
                 continue;
             }
         } else {
-            connectionErrors = 0; // Сброс счетчика при успешном соединении
+            connectionErrors = 0;
         }
         
         auto startTime = std::chrono::high_resolution_clock::now();
@@ -88,7 +82,6 @@ void AsyncDataManager::workerFunction() {
         bool hasValidData = false;
         
         try {
-            // Чтение данных мультиметра
             if (multimeter->getDeviceNode().isValid()) {
                 auto values = multimeter->readAllValues(*client);
                 if (!values.empty()) {
@@ -96,7 +89,6 @@ void AsyncDataManager::workerFunction() {
                     hasValidData = true;
                     newData.multimeter.timestamp = std::chrono::system_clock::now();
                     
-                    // Распределяем значения по порядку
                     if (values.size() > 0 && values[0].first) newData.multimeter.voltage = values[0].second;
                     if (values.size() > 1 && values[1].first) newData.multimeter.current = values[1].second;
                     if (values.size() > 2 && values[2].first) newData.multimeter.resistance = values[2].second;
@@ -108,7 +100,6 @@ void AsyncDataManager::workerFunction() {
                 newData.multimeter.valid = false;
             }
             
-            // Чтение данных станка
             if (machine->getDeviceNode().isValid()) {
                 auto values = machine->readAllValues(*client);
                 if (!values.empty()) {
@@ -127,7 +118,6 @@ void AsyncDataManager::workerFunction() {
                 newData.machine.valid = false;
             }
             
-            // Чтение данных компьютера
             if (computer->getDeviceNode().isValid()) {
                 auto values = computer->readAllValues(*client);
                 if (!values.empty()) {
@@ -150,18 +140,15 @@ void AsyncDataManager::workerFunction() {
             
             newData.allValid = hasValidData;
             
-            // Сброс счетчика ошибок чтения при успешном чтении
             if (hasValidData) {
                 readErrors = 0;
             } else {
                 readErrors++;
                 if (readErrors >= maxReadErrors) {
                     std::cerr << "Многократные ошибки чтения данных. Проверьте соединение с сервером." << std::endl;
-                    // Не увеличиваем паузу, продолжаем попытки
                 }
             }
             
-            // Быстрая блокировка для обновления данных
             {
                 std::lock_guard<std::mutex> lock(dataMutex);
                 currentData = newData;
@@ -175,7 +162,6 @@ void AsyncDataManager::workerFunction() {
                 std::cerr << "Критическая ошибка: невозможно прочитать данные после " << maxReadErrors << " попыток." << std::endl;
             }
             
-            // Помечаем данные как невалидные в случае исключения
             {
                 std::lock_guard<std::mutex> lock(dataMutex);
                 currentData.multimeter.valid = false;
@@ -185,26 +171,23 @@ void AsyncDataManager::workerFunction() {
             }
         }
         
-        // Вычисляем время выполнения и регулируем паузу
         auto endTime = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
         
         int sleepTime = updateIntervalMs - static_cast<int>(duration);
         
-        // Динамическая регулировка паузы в зависимости от ошибок
         if (readErrors > 0) {
-            sleepTime = std::max(sleepTime, 50); // Минимум 50мс при ошибках
+            sleepTime = std::max(sleepTime, 50);
         }
         
         if (connectionErrors > 0) {
-            sleepTime = std::max(sleepTime, 100); // Минимум 100мс при потере соединения
+            sleepTime = std::max(sleepTime, 100);
         }
         
         if (sleepTime > 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));
         } else {
-            // Если чтение заняло больше времени, чем интервал, продолжаем без задержки
-            std::this_thread::sleep_for(std::chrono::milliseconds(1)); // Минимальная задержка
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
 }

@@ -59,7 +59,7 @@ private:
     MachineDevice* machine;
     ComputerDevice* computer;
     
-    int updateIntervalMs;  // Интервал обновления в миллисекундах
+    int updateIntervalMs;
 
     void workerFunction();
 
@@ -68,7 +68,7 @@ public:
                     MultimeterDevice* multimeter,
                     MachineDevice* machine,
                     ComputerDevice* computer,
-                    int updateIntervalMs = 50);  // По умолчанию 50 мс
+                    int updateIntervalMs = 50);
     
     ~AsyncDataManager();
     
@@ -79,4 +79,4 @@ public:
     void setUpdateInterval(int ms) { updateIntervalMs = ms; }
 };
 
-#endif // ASYNC_MANAGER_H
+#endif

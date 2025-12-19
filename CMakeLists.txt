@@ -6,9 +6,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
 
-# =========================
-# open62541
-# =========================
 set(UA_ENABLE_AMALGAMATION ON CACHE BOOL "" FORCE)
 set(UA_ENABLE_SUBSCRIPTIONS ON CACHE BOOL "" FORCE)
 set(UA_ENABLE_METHODCALLS ON CACHE BOOL "" FORCE)
@@ -28,9 +25,6 @@ set(UA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(open62541)
 
-# =========================
-# SFML 3
-# =========================
 FetchContent_Declare(
     SFML
     GIT_REPOSITORY https://github.com/SFML/SFML.git
@@ -39,9 +33,6 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(SFML)
 
-# =========================
-# Sources
-# =========================
 set(SOURCES
     main_gui.cpp
     simple_window.cpp
@@ -64,9 +55,6 @@ target_include_directories(Kursovaya
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# =========================
-# Linking
-# =========================
 target_link_libraries(Kursovaya
     PRIVATE
         open62541
