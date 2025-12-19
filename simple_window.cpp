@@ -15,6 +15,9 @@ constexpr float ATTR_LINE_HEIGHT = 38.f;
 constexpr float LEFT_PANEL_START_Y = 130.f;
 constexpr float DEVICE_ITEM_HEIGHT = 30.f;
 
+const sf::Color DISCONNECT_ACTIVE   = sf::Color(160, 60, 60);
+const sf::Color DISCONNECT_DISABLED = sf::Color(120, 120, 120);
+
 constexpr float RP_X        = 750.f;
 constexpr float RP_WIDTH    = 410.f;
 constexpr float ROW_H    = 28.f;
@@ -42,9 +45,6 @@ sf::String clampTextUtf8(const std::string& s, std::size_t maxChars)
     return result;
 }
 
-
-
-
 struct RightPanelAttribute {
     std::string name;
     std::string displayName;
@@ -60,9 +60,15 @@ SimpleWindow::SimpleWindow()
     window.setVerticalSyncEnabled(true);
 
     serverBox.setSize({
-    window.getSize().x - 145.f, 48.f});
+    window.getSize().x - 330.f, 48.f});
     serverBox.setPosition({20.f, 10.f});
     serverBox.setFillColor(panel);
+
+    // Кнопка "Отключение"
+    disconnectBtn.setSize({170.f, 48.f});
+    disconnectBtn.setPosition({serverBox.getPosition().x + serverBox.getSize().x + 20.f, serverBox.getPosition().y});
+    disconnectBtn.setFillColor(DISCONNECT_DISABLED);
+
 
     leftPanel.setSize({450.f, window.getSize().y - 120.f});
     leftPanel.setPosition({20.f, 75.f});
@@ -160,6 +166,37 @@ void SimpleWindow::handleEvents()
                 connectToServer();
                 return;
             }
+
+            // ===== Отключение от сервера =====
+            if (connected && isMouseOver(disconnectBtn)) {
+                if (asyncManager) {
+                    asyncManager->stop();
+                    asyncManager.reset();
+                }
+
+                if (client) {
+                    client->disconnect();
+                    client.reset();
+                }
+
+                connected = false;
+                devicesInitialized = false;
+
+                rightPanelData.clear();
+                rightPanelSelection.clear();
+                expandedDevices.clear();
+
+                for (auto& a : multimeterAttributes) a.isSelected = false;
+                for (auto& a : machineAttributes) a.isSelected = false;
+                for (auto& a : computerAttributes) a.isSelected = false;
+
+                multimeterData = {};
+                machineData = {};
+                computerData = {};
+
+                return;
+            }
+
 
             // ===== Центр кнопки =====
             if (isMouseOver(moveRightBtn)) {
@@ -315,13 +352,28 @@ void SimpleWindow::drawHeader()
 {
     window.draw(serverBox);
 
+    // ===== Кнопка "Отключение" =====
+    disconnectBtn.setFillColor(
+        connected ? DISCONNECT_ACTIVE : DISCONNECT_DISABLED
+    );
+    window.draw(disconnectBtn);
+
+    drawText(
+        "Отключение",
+        disconnectBtn.getPosition().x + 14.f,
+        disconnectBtn.getPosition().y + 12.f,
+        connected ? sf::Color::White : disabled,
+        22
+    );
+
+    // ===== Статус сервера =====
     if (connected)
         drawText("● opc.tcp://127.0.0.1:4840", 30.f, 18.f, sf::Color::White, 26);
     else
         drawText("✖ Сервер не подключён", 30.f, 18.f, disabled, 26);
 
     float padding = 15.f;
-    float rightX = window.getSize().x - 120.f; // ширина под время
+    float rightX = window.getSize().x - 120.f;
 
     drawText(currentTime(), rightX + 15.f, padding, sf::Color::Green, 19);
     drawText(currentDate(), rightX + 15.f, padding + 22.f, text, 14);
@@ -332,10 +384,10 @@ void SimpleWindow::drawHeader()
 void SimpleWindow::drawLeftPanel()
 {
     window.draw(leftPanel);
-    drawText("Доступные устройства", 40.f, 80.f, text, 30);
+    drawText("Доступные устройства", 60.f, 80.f, text, 30);
 
     if (!connected || !devicesInitialized) {
-        drawText("Нет подключённых устройств", 40.f, 130.f, disabled);
+        drawText("Нет подключённых устройств", 60.f, 420.f, disabled, 22);
         return;
     }
 
@@ -392,7 +444,7 @@ void SimpleWindow::drawLeftPanel()
 void SimpleWindow::drawRightPanel()
 {
     window.draw(rightPanel);
-    drawText("Мониторинг параметров", RP_X + 20.f, 80.f, text, 30);
+    drawText("Мониторинг параметров", RP_X + 10.f, 80.f, text, 30);
 
     if (rightPanelData.empty()) {
         drawText("Нет выбранных параметров", RP_X + 40.f, 420.f, disabled, 22);

@@ -113,6 +113,7 @@ private:
     sf::RectangleShape moveRightBtn;
     sf::RectangleShape moveLeftBtn;
     sf::RectangleShape clearAllBtn;
+    sf::RectangleShape disconnectBtn;
 
     // ===== Data =====
     struct {
