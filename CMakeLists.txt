@@ -1,17 +1,47 @@
 cmake_minimum_required(VERSION 3.20)
-project(Kursovaya)
+project(Kursovaya LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-if(MINGW)
-    set(MSYS2_PREFIX "C:/msys64/ucrt64")
-    set(CMAKE_PREFIX_PATH ${MSYS2_PREFIX})
-endif()
+include(FetchContent)
 
-find_package(open62541 REQUIRED)
-find_package(SFML 3 REQUIRED COMPONENTS Graphics Window System)
+# =========================
+# open62541
+# =========================
+set(UA_ENABLE_AMALGAMATION ON CACHE BOOL "" FORCE)
+set(UA_ENABLE_SUBSCRIPTIONS ON CACHE BOOL "" FORCE)
+set(UA_ENABLE_METHODCALLS ON CACHE BOOL "" FORCE)
+set(UA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(UA_BUILD_UNIT_TESTS OFF CACHE BOOL "" FORCE)
 
+FetchContent_Declare(
+    open62541
+    GIT_REPOSITORY https://github.com/open62541/open62541.git
+    GIT_TAG v1.3.8
+)
+
+set(UA_ENABLE_AMALGAMATION OFF CACHE BOOL "" FORCE)
+set(UA_ENABLE_ENCRYPTION OFF CACHE BOOL "" FORCE) # опционально
+set(UA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(UA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(open62541)
+
+# =========================
+# SFML 3
+# =========================
+FetchContent_Declare(
+    SFML
+    GIT_REPOSITORY https://github.com/SFML/SFML.git
+    GIT_TAG master
+)
+
+FetchContent_MakeAvailable(SFML)
+
+# =========================
+# Sources
+# =========================
 set(SOURCES
     main_gui.cpp
     simple_window.cpp
@@ -22,16 +52,29 @@ set(SOURCES
 
 add_executable(Kursovaya ${SOURCES})
 
-target_include_directories(Kursovaya PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_custom_command(
+    TARGET Kursovaya POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/res
+            $<TARGET_FILE_DIR:Kursovaya>/res
+)
 
+target_include_directories(Kursovaya
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# =========================
+# Linking
+# =========================
 target_link_libraries(Kursovaya
     PRIVATE
-        open62541::open62541
+        open62541
         SFML::Graphics
         SFML::Window
         SFML::System
 )
 
 if(WIN32)
-     set_target_properties(Kursovaya PROPERTIES WIN32_EXECUTABLE TRUE)
+    set_target_properties(Kursovaya PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()

@@ -102,7 +102,7 @@ SimpleWindow::~SimpleWindow() {
 
 bool SimpleWindow::initialize()
 {
-    fontLoaded = font.openFromFile("DejaVuSans.ttf");
+    fontLoaded = font.openFromFile("res/fonts/DejaVuSans.ttf");
     return fontLoaded;
 }
 
