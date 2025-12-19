@@ -6,7 +6,7 @@
 #include <ctime>
 #include <sstream>
 
-// Реализация ConsoleManager
+
 
 void ConsoleManager::setupConsole() {
 #ifdef _WIN32
@@ -97,7 +97,7 @@ bool ConsoleManager::isKeyPressed() {
     return _kbhit() != 0;
 }
 
-// Реализация OPCUAApplication
+
 
 OPCUAApplication::OPCUAApplication(const std::string& endpoint)
     : client(endpoint), nodesFound(false), running(true), 
@@ -147,7 +147,7 @@ bool OPCUAApplication::initialize() {
         return false;
     }
 
-    // Инициализация асинхронного менеджера данных
+    
     asyncManager = std::make_unique<AsyncDataManager>(&client, &multimeter, &machine, &computer, 20);
     asyncManager->start();
 
@@ -163,26 +163,26 @@ bool OPCUAApplication::reconnect() {
     reconnectAttempts++;
     std::cout << "\nПопытка переподключения #" << reconnectAttempts << "..." << std::endl;
     
-    // Останавливаем асинхронный менеджер
+    
     if (asyncManager) {
         asyncManager->stop();
         asyncManager.reset();
     }
     
-    // Закрываем соединение
+    
     client.disconnect();
     
-    // Пауза перед повторной попыткой
+   
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     
-    // Пробуем подключиться
+    
     if (client.connect()) {
-        // Переинициализируем устройства
+        
         multimeter.initialize(client, objectsFolder);
         machine.initialize(client, objectsFolder);
         computer.initialize(client, objectsFolder);
         
-        // Запускаем асинхронный менеджер
+        
         asyncManager = std::make_unique<AsyncDataManager>(&client, &multimeter, &machine, &computer, 20);
         asyncManager->start();
         
@@ -217,7 +217,7 @@ void OPCUAApplication::run() {
     bool paused = false;
     
     while (running) {
-        // Проверка соединения каждые 2 секунды
+        
         auto currentTime = std::chrono::high_resolution_clock::now();
         auto elapsedCheck = std::chrono::duration_cast<std::chrono::milliseconds>(
             currentTime - lastConnectionCheck).count();
@@ -232,10 +232,10 @@ void OPCUAApplication::run() {
             lastConnectionCheck = currentTime;
         }
         
-        // Обработка ввода
+        
         handleInput();
         
-        // Проверка на паузу
+        
         if (ConsoleManager::isKeyPressed()) {
             char c = ConsoleManager::getKeyPress();
             if (c == 'p' || c == 'P') {
@@ -245,7 +245,7 @@ void OPCUAApplication::run() {
             }
         }
         
-        // Отображение данных, если не на паузе и есть соединение
+        
         if (!paused && !connectionLost) {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 currentTime - lastDisplayTime).count();
@@ -299,7 +299,7 @@ void OPCUAApplication::handleInput() {
                 break;
                 
             case 'm':
-            case 'M':  // Добавляем управление режимом
+            case 'M':  
                 handleControlModeInput();
                 break;
         }
@@ -321,7 +321,7 @@ void OPCUAApplication::handleRPMInput() {
     try {
         double newRpm = std::stod(input);
         
-        // Проверка диапазона
+        
         if (newRpm < 0.0) newRpm = 0.0;
         if (newRpm > 3000.0) newRpm = 3000.0;
         
@@ -368,10 +368,10 @@ void OPCUAApplication::handleControlModeInput() {
 }
 
 void OPCUAApplication::readAndDisplayValues() {
-    // Используем асинхронные данные
+    
     auto data = asyncManager->getCurrentData();
     
-    // Перемещаем курсор в начало
+    
     static bool firstRun = true;
     if (firstRun) {
         ConsoleManager::clearConsole();
@@ -383,7 +383,7 @@ void OPCUAApplication::readAndDisplayValues() {
     auto now = std::chrono::system_clock::now();
     auto now_time = std::chrono::system_clock::to_time_t(now);
     
-    // Быстрый вывод заголовка
+    
     std::cout << "===========================================\n";
     std::cout << "Данные OPC UA - " << std::ctime(&now_time);
     std::cout << "Обновление: " 
@@ -392,15 +392,15 @@ void OPCUAApplication::readAndDisplayValues() {
               << " мс назад\n";
     std::cout << "Частота: " << (1000 / displayIntervalMs) << " FPS\n";
     
-    // Отображение статуса соединения
+    
     std::cout << "Статус: " << (connectionLost ? "ОТКЛЮЧЕНО" : "ПОДКЛЮЧЕНО") << "\n";
     
     std::cout << "===========================================\n";
     
-    // Быстрый вывод данных
+    
     displayAllDevicesAsync(data);
     
-    // Вывод инструкций по управлению
+    
     std::cout << "\nУправление станциком:\n";
     std::cout << "  'r' - задать обороты (0-3000 об/мин)\n";
     std::cout << "  'm' - выбрать режим (0=авто, 1=ручной)\n";

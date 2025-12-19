@@ -10,7 +10,7 @@
 #include <atomic>
 #include <memory>
 
-// Класс для работы с консолью
+
 class ConsoleManager {
 public:
     static void setupConsole();
@@ -25,7 +25,7 @@ public:
     static bool isKeyPressed();
 };
 
-// Основной класс приложения
+
 class OPCUAApplication {
 private:
     OPCUAClient client;
@@ -38,11 +38,11 @@ private:
     std::atomic<bool> running;
     std::atomic<bool> connectionLost;
     
-    // Добавляем асинхронный менеджер
-    std::unique_ptr<AsyncDataManager> asyncManager;
-    int displayIntervalMs;  // Интервал отображения в мс
     
-    // Добавляем счетчик попыток переподключения
+    std::unique_ptr<AsyncDataManager> asyncManager;
+    int displayIntervalMs;  
+    
+    
     int reconnectAttempts;
     const int maxReconnectAttempts = 10;
 
@@ -51,19 +51,19 @@ public:
     ~OPCUAApplication();
     
     bool initialize();
-    bool reconnect();  // Новый метод для переподключения
+    bool reconnect();  
     void run();
     void shutdown();
     
-    bool checkConnection();  // Проверка соединения
+    bool checkConnection();  
 
 private:
     void handleInput();
     void handleRPMInput();
-    void handleControlModeInput();  // Новый метод
+    void handleControlModeInput();  
     void readAndDisplayValues();
     void displayAllDevicesAsync(const DeviceData& data);
-    void displayConnectionStatus();  // Новый метод
+    void displayConnectionStatus();  
 };
 
-#endif // CONSOLE_MANAGER_H
+#endif 

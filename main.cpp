@@ -11,25 +11,25 @@
 #include <windows.h>
 #endif
 
-// Глобальный указатель на приложение для обработки сигналов
+
 namespace {
     OPCUAApplication* g_app = nullptr;
     std::atomic<bool> g_shutdownRequested{false};
 }
 
-// Класс для обработки сигналов
+
 class SignalHandler {
 private:
     static std::atomic<bool> running;
 
 public:
     static void initialize() {
-        // Устанавливаем обработчики для POSIX сигналов
+        
         std::signal(SIGINT, signalHandler);
         std::signal(SIGTERM, signalHandler);
         
 #ifdef _WIN32
-        // Для Windows дополнительно устанавливаем обработчик событий консоли
+        
         SetConsoleCtrlHandler(consoleCtrlHandler, TRUE);
 #endif
     }
@@ -39,13 +39,13 @@ public:
         running = false;
         g_shutdownRequested = true;
         
-        // Уведомляем приложение о необходимости остановки
+        
         if (g_app) {
-            // Запускаем остановку в отдельном потоке, чтобы избежать блокировок
+            
             std::thread shutdownThread([]() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 if (g_app) {
-                    // Вызываем shutdown через указатель на метод
+                    
                     g_app->shutdown();
                 }
             });
@@ -81,7 +81,7 @@ private:
                 break;
         }
         stop();
-        return TRUE; // Обработчик принял событие
+        return TRUE; 
     }
 #endif
 };
@@ -98,7 +98,7 @@ int main() {
     
     try {
         OPCUAApplication app;
-        g_app = &app; // Сохраняем указатель для обработки сигналов
+        g_app = &app; 
         
         if (!app.initialize()) {
             std::cerr << "Ошибка инициализации приложения." << std::endl;
@@ -113,32 +113,32 @@ int main() {
         std::cout << "\nПриложение успешно инициализировано." << std::endl;
         std::cout << "Для выхода нажмите Ctrl+C или 'q' в программе." << std::endl;
         
-        // Запускаем приложение в отдельном потоке
+        
         std::thread appThread([&app]() {
             app.run();
         });
         
-        // Главный поток отслеживает запрос на завершение
+        
         while (!g_shutdownRequested && SignalHandler::isRunning()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             
-            // Дополнительная проверка для корректного завершения
+            
             if (!appThread.joinable()) {
                 break;
             }
         }
         
-        // Если был запрос на завершение, но приложение еще работает
+        
         if (g_shutdownRequested && appThread.joinable()) {
             std::cout << "\nЗавершение приложения..." << std::endl;
             
-            // Даем время на корректное завершение
+            
             for (int i = 0; i < 10 && appThread.joinable(); i++) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
         }
         
-        // Ожидаем завершения потока приложения
+        
         if (appThread.joinable()) {
             appThread.join();
         }
@@ -155,7 +155,7 @@ int main() {
         return 1;
     }
     
-    // Сброс глобального указателя
+    
     g_app = nullptr;
     
     return 0;

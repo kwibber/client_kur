@@ -3,7 +3,7 @@
 #include <cstring>
 #include <type_traits>
 
-// Реализация OPCUANode
+
 
 OPCUANode::OPCUANode() : nodeId(UA_NODEID_NULL) {}
 
@@ -62,7 +62,7 @@ void OPCUANode::printInfo() const {
     }
 }
 
-// Реализация OPCUAClient
+
 
 OPCUAClient::OPCUAClient(const std::string& endpoint) 
     : client(nullptr), endpoint(endpoint) {}

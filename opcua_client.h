@@ -7,7 +7,7 @@
 #include <vector>
 #include <memory>
 
-// Класс для представления узла OPC UA
+
 class OPCUANode {
 private:
     UA_NodeId nodeId;
@@ -31,7 +31,7 @@ public:
     void printInfo() const;
 };
 
-// Класс OPC UA клиента
+
 class OPCUAClient {
 private:
     UA_Client* client;
@@ -39,7 +39,7 @@ private:
 
     void cleanup();
     
-    // Вспомогательные функции для определения типа данных
+    
     template<typename T>
     static const UA_DataType* getDataType() {
         if constexpr (std::is_same_v<T, double>) {
@@ -58,11 +58,11 @@ public:
     OPCUAClient(const std::string& endpoint = "opc.tcp://127.0.0.1:4840");
     ~OPCUAClient();
 
-    // Запрещаем копирование
+    
     OPCUAClient(const OPCUAClient&) = delete;
     OPCUAClient& operator=(const OPCUAClient&) = delete;
 
-    // Разрешаем перемещение
+    
     OPCUAClient(OPCUAClient&& other) noexcept;
     OPCUAClient& operator=(OPCUAClient&& other) noexcept;
 
@@ -70,11 +70,11 @@ public:
     void disconnect();
     bool isConnected() const;
 
-    // Методы для работы с узлами
+    
     OPCUANode findNodeByBrowseName(const OPCUANode& parentNode, const std::string& browseName) const;
     std::vector<OPCUANode> findDeviceComponents(const OPCUANode& deviceNode) const;
     
-    // Методы чтения/записи значений
+    
     template<typename T>
     bool readValue(const OPCUANode& node, T& value) const;
     
@@ -86,7 +86,7 @@ public:
     std::vector<std::pair<bool, double>> readMultipleValues(const std::vector<OPCUANode>& nodes) const;
 };
 
-// Определения шаблонных методов inline
+
 template<typename T>
 bool OPCUAClient::readValue(const OPCUANode& node, T& value) const {
     if (!client || !node.isValid()) return false;
@@ -152,4 +152,4 @@ bool OPCUAClient::writeValue(const OPCUANode& node, const T& value) {
     return success;
 }
 
-#endif // OPCUA_CLIENT_H
+#endif 

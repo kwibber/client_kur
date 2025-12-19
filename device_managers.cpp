@@ -1,7 +1,7 @@
 #include "device_managers.h"
 #include <iostream>
 
-// Реализация MultimeterDevice
+
 
 MultimeterDevice::MultimeterDevice() {}
 
@@ -64,7 +64,7 @@ const OPCUANode& MultimeterDevice::getResistanceNode() const { return resistance
 const OPCUANode& MultimeterDevice::getPowerNode() const { return powerNode; }
 const std::vector<OPCUANode>& MultimeterDevice::getAllNodes() const { return allNodes; }
 
-// Реализация MachineDevice
+
 
 MachineDevice::MachineDevice() {}
 
@@ -153,7 +153,7 @@ const OPCUANode& MachineDevice::getTargetRPMNode() const { return targetRPMNode;
 const OPCUANode& MachineDevice::getControlModeNode() const { return rpmControlModeNode; }
 const std::vector<OPCUANode>& MachineDevice::getAllNodes() const { return allNodes; }
 
-// Реализация ComputerDevice
+
 
 ComputerDevice::ComputerDevice() {}
 

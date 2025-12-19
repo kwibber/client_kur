@@ -6,7 +6,7 @@
 #include <string>
 #include <utility>
 
-// Класс для управления устройством "Мультиметр"
+
 class MultimeterDevice {
 private:
     OPCUANode deviceNode;
@@ -32,7 +32,7 @@ public:
     const std::vector<OPCUANode>& getAllNodes() const;
 };
 
-// Класс для управления устройством "Станок"
+
 class MachineDevice {
 private:
     OPCUANode deviceNode;
@@ -40,8 +40,8 @@ private:
     OPCUANode powerNode;
     OPCUANode voltageNode;
     OPCUANode energyConsumptionNode;
-    OPCUANode targetRPMNode;          // Для записи целевых оборотов
-    OPCUANode rpmControlModeNode;     // Для управления режимом
+    OPCUANode targetRPMNode;          
+    OPCUANode rpmControlModeNode;     
     std::vector<OPCUANode> allNodes;
 
 public:
@@ -50,8 +50,8 @@ public:
     bool readValues(OPCUAClient& client, double& rpm, double& power, 
                     double& voltage, double& energy) const;
     std::vector<std::pair<bool, double>> readAllValues(OPCUAClient& client) const;
-    bool setTargetRPM(OPCUAClient& client, double rpm);  // Новый метод для записи целевых оборотов
-    bool setControlMode(OPCUAClient& client, int mode);  // Новый метод для изменения режима
+    bool setTargetRPM(OPCUAClient& client, double rpm);  
+    bool setControlMode(OPCUAClient& client, int mode);  
     void printStatus() const;
     
     const OPCUANode& getDeviceNode() const;
@@ -59,12 +59,12 @@ public:
     const OPCUANode& getPowerNode() const;
     const OPCUANode& getVoltageNode() const;
     const OPCUANode& getEnergyConsumptionNode() const;
-    const OPCUANode& getTargetRPMNode() const;      // Новый метод
-    const OPCUANode& getControlModeNode() const;    // Новый метод
+    const OPCUANode& getTargetRPMNode() const;      
+    const OPCUANode& getControlModeNode() const;    
     const std::vector<OPCUANode>& getAllNodes() const;
 };
 
-// Класс для управления устройством "Компьютер"
+
 class ComputerDevice {
 private:
     OPCUANode deviceNode;
@@ -88,4 +88,4 @@ public:
     const std::vector<OPCUANode>& getAllNodes() const;
 };
 
-#endif // DEVICE_MANAGERS_H
+#endif 
